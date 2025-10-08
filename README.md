@@ -1,6 +1,6 @@
-# Phase 1 – Veloura Storefront
+# Phase 1 – The Smelly Water Club
 
-This repository hosts the Phase 1 launch of the Veloura e-commerce experience, featuring a high-fidelity product detail page tailored for the Velour Eau de Parfum.
+This repository hosts the Phase 1 launch of The Smelly Water Club e-commerce experience, featuring a high-fidelity product detail page tailored for the Velour Eau de Parfum.
 
 ## Getting Started
 
