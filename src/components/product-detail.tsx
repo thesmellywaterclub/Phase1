@@ -76,7 +76,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
   const handleBuyNow = () => {
     if (!inStock) return;
     addItem(product.slug, variant.id, qty);
-    router.push("/cart");
+    router.push("/checkout");
   };
 
   return (

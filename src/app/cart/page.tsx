@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ChevronRight,
@@ -43,6 +44,7 @@ export default function ShoppingCartPage() {
   const removeItem = useCartStore((state) => state.removeItem);
   const setItemQuantity = useCartStore((state) => state.setItemQuantity);
   const addItem = useCartStore((state) => state.addItem);
+  const router = useRouter();
 
   const detailedItems = useMemo(() => {
     return items
@@ -446,6 +448,7 @@ export default function ShoppingCartPage() {
               <Button
                 className="flex w-full items-center justify-center gap-2 bg-pink-600 hover:bg-pink-700"
                 disabled={isEmpty}
+                onClick={() => router.push("/checkout")}
               >
                 Proceed to checkout <ChevronRight className="h-4 w-4" />
               </Button>
