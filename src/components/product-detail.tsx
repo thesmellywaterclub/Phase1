@@ -34,6 +34,7 @@ import type { Product, RelatedProduct } from "@/data/products";
 import { CartIndicator } from "@/components/cart-indicator";
 import { useCartStore } from "@/lib/cart-store";
 import { AccountButton } from "@/components/account-button";
+import { SiteSearchBar } from "@/components/site-search-bar";
 import { cn } from "@/lib/utils";
 
 type ProductDetailProps = {
@@ -163,23 +164,30 @@ export function ProductDetail({ product }: ProductDetailProps) {
   return (
     <div className="min-h-screen bg-white text-gray-900">
       <header className="sticky top-0 z-40 border-b bg-white/80 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
-          <a href="#" className="font-extrabold tracking-wide">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
+          <a href="#" className="order-1 font-extrabold tracking-wide">
             The Smelly Water Club
           </a>
-          <Separator orientation="vertical" className="mx-1 h-5" />
-          <nav className="truncate text-sm text-gray-500">
+          <Separator
+            orientation="vertical"
+            className="order-2 mx-1 hidden h-5 sm:block"
+          />
+          <nav className="order-3 flex flex-wrap items-center gap-1 text-sm text-gray-500 sm:flex-nowrap sm:gap-2">
             <a className="hover:text-gray-900" href="#">
               Home
             </a>
-            <span className="px-1">/</span>
+            <span className="text-gray-300">/</span>
             <a className="hover:text-gray-900" href="#">
               Women
             </a>
-            <span className="px-1">/</span>
+            <span className="text-gray-300">/</span>
             <span className="text-gray-800">{product.title}</span>
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="order-4 ml-auto flex items-center gap-2">
+            <SiteSearchBar
+              placeholder="Search compositions, rituals, stories…"
+              className="hidden md:flex md:w-72 lg:w-80"
+            />
             <Button size="icon" variant="outline" aria-label="Share">
               <Share2 className="h-4 w-4" />
             </Button>
@@ -188,6 +196,12 @@ export function ProductDetail({ product }: ProductDetailProps) {
             </Button>
             <AccountButton className="hidden sm:inline-flex" />
             <CartIndicator />
+          </div>
+          <div className="order-5 w-full md:hidden">
+            <SiteSearchBar
+              placeholder="Search compositions, rituals, stories…"
+              className="w-full"
+            />
           </div>
         </div>
       </header>

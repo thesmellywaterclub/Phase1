@@ -14,6 +14,7 @@ import { AccountButton } from "@/components/account-button";
 import { CartIndicator } from "@/components/cart-indicator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { SiteSearchBar } from "@/components/site-search-bar";
 import { getHomePageData } from "@/data/home";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +51,9 @@ export default async function Home() {
             <Link href="/products" className="transition hover:text-gray-900">
               Collection
             </Link>
+            <Link href="/search" className="transition hover:text-gray-900">
+              Search
+            </Link>
             <Link href="/account" className="transition hover:text-gray-900">
               My Account
             </Link>
@@ -61,11 +65,19 @@ export default async function Home() {
             </Link>
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <SiteSearchBar
+              placeholder="Search fragrances, rituals, stories…"
+              className="hidden md:flex md:w-72 lg:w-80"
+            />
             <AccountButton className="hidden sm:inline-flex" />
             <CartIndicator />
           </div>
         </div>
       </header>
+
+      <div className="border-b border-gray-200 bg-white px-4 py-3 md:hidden">
+        <SiteSearchBar placeholder="Search fragrances, rituals, stories…" className="w-full" />
+      </div>
 
       <main className="mx-auto max-w-7xl space-y-20 px-4 pb-20 pt-12">
         <section className="overflow-hidden rounded-[2.5rem] border border-gray-200 bg-white px-6 py-10 sm:px-10">
