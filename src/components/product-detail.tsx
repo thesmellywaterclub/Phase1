@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import Image from "next/image";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,10 +30,11 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import type { Product } from "@/data/products";
+import type { Product, RelatedProduct } from "@/data/products";
 import { CartIndicator } from "@/components/cart-indicator";
 import { useCartStore } from "@/lib/cart-store";
 import { AccountButton } from "@/components/account-button";
+import { cn } from "@/lib/utils";
 
 type ProductDetailProps = {
   product: Product;
@@ -58,15 +60,94 @@ export function ProductDetail({ product }: ProductDetailProps) {
   const [zoom, setZoom] = useState({ show: false, x: 50, y: 50 });
   const addItem = useCartStore((state) => state.addItem);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const variantParam = searchParams.get("variant");
   const maxQty = variant.stock ?? Number.POSITIVE_INFINITY;
   const limitReached = Number.isFinite(maxQty) && qty >= maxQty;
+  const showLimitWarning = inStock && limitReached;
+  const outOfStock = !inStock;
+  const [accordionValue, setAccordionValue] = useState<string | null>(null);
+  const noteSections = [
+    {
+      id: "top",
+      label: "Top Accord",
+      caption: "First impression",
+      notes: product.notes.top,
+      accent: "from-rose-100/70 via-rose-50/60 to-white",
+    },
+    {
+      id: "heart",
+      label: "Heart Accord",
+      caption: "Signature trail",
+      notes: product.notes.heart,
+      accent: "from-pink-100/70 via-pink-50/60 to-white",
+    },
+    {
+      id: "base",
+      label: "Base Accord",
+      caption: "Lingering finish",
+      notes: product.notes.base,
+      accent: "from-amber-100/70 via-amber-50/60 to-white",
+    },
+  ];
+  const layeringSuggestions = [
+    {
+      title: "Prime the pulse points",
+      description: `Warm wrists and collarbone so ${product.notes.top
+        .slice(0, 2)
+        .join(" & ")} diffuse with brightness.`,
+    },
+    product.related[0]
+      ? ({
+          title: `Veil with ${product.related[0].name}`,
+          description: `Mist a light cloud of ${product.related[0].name} to echo the ${product.notes.heart[0]?.toLowerCase() ?? "heart"} accord.`,
+          related: product.related[0],
+        } satisfies { title: string; description: string; related: RelatedProduct })
+      : null,
+    {
+      title: "Finish with a floating mist",
+      description: `Spray ${product.title} from arm's length to leave a soft trail of ${product.notes.base
+        .slice(0, 2)
+        .join(" & ")}.`,
+    },
+  ].filter((item): item is { title: string; description: string; related?: RelatedProduct } => item !== null);
 
   useEffect(() => {
     setQty((current) => {
-      if (!variant.stock) return 1;
+      if (!variant.stock) {
+        return 0;
+      }
       return Math.max(1, Math.min(current, variant.stock));
     });
   }, [variant]);
+
+  useEffect(() => {
+    if (!variantParam) return;
+    const matched = product.variants.find((option) => option.id === variantParam);
+    if (!matched) return;
+    setVariant((current) => (current.id === matched.id ? current : matched));
+  }, [variantParam, product.variants]);
+
+  const focusNotesSection = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const hash = window.location.hash.replace("#", "");
+    if (hash === "notes") {
+      setAccordionValue("notes");
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById("notes")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    focusNotesSection();
+    window.addEventListener("hashchange", focusNotesSection);
+    return () => window.removeEventListener("hashchange", focusNotesSection);
+  }, [focusNotesSection]);
 
   const handleAddToCart = () => {
     if (!inStock) return;
@@ -283,22 +364,36 @@ export function ProductDetail({ product }: ProductDetailProps) {
               <div className="mt-5">
                 <div className="mb-2 text-sm font-medium">Size</div>
                 <div className="flex flex-wrap gap-2">
-                  {product.variants.map((option) => (
-                    <button
-                      key={option.id}
-                      disabled={option.stock === 0}
-                      onClick={() => setVariant(option)}
-                      className={`rounded-full border px-4 py-2 text-sm transition ${
-                        variant.id === option.id
-                          ? "border-pink-600 bg-pink-50 text-pink-700"
-                          : "border-gray-300 hover:border-gray-400"
-                      } ${
-                        option.stock === 0 ? "cursor-not-allowed opacity-50" : ""
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+                  {product.variants.map((option) => {
+                    const optionInStock = option.stock > 0;
+                    const isActive = variant.id === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setVariant(option)}
+                        className={cn(
+                          "rounded-full border px-4 py-2 text-sm transition",
+                          optionInStock
+                            ? "border-gray-300 hover:border-gray-400"
+                            : "border-rose-200 bg-rose-50 text-rose-500 hover:border-rose-300",
+                          isActive &&
+                            (optionInStock
+                              ? "border-pink-600 bg-pink-50 text-pink-700"
+                              : "border-rose-600 bg-rose-600 text-white"),
+                          !optionInStock && "cursor-pointer"
+                        )}
+                        aria-pressed={isActive}
+                      >
+                        <span>{option.label}</span>
+                        {!optionInStock && (
+                          <span className="ml-2 rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-rose-600">
+                            Sold out
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -313,12 +408,22 @@ export function ProductDetail({ product }: ProductDetailProps) {
               </div>
 
               <div className="mt-5 flex items-center gap-3">
-                <div className="inline-flex items-center gap-3 rounded-full border px-3 py-2">
+                <div
+                  className={cn(
+                    "inline-flex items-center gap-3 rounded-full border px-3 py-2 transition",
+                    outOfStock && "border-rose-200 bg-rose-50 text-rose-400"
+                  )}
+                >
                   <button
                     onClick={() =>
                       setQty((current) => Math.max(1, current - 1))
                     }
                     aria-label="Decrease quantity"
+                    disabled={outOfStock}
+                    className={cn(
+                      "transition",
+                      outOfStock && "text-rose-300"
+                    )}
                   >
                     <Minus className="h-4 w-4" />
                   </button>
@@ -332,32 +437,48 @@ export function ProductDetail({ product }: ProductDetailProps) {
                       )
                     }
                     aria-label="Increase quantity"
-                    disabled={limitReached}
-                    className="disabled:opacity-40"
+                    disabled={outOfStock || limitReached}
+                    className={cn(
+                      "disabled:opacity-40",
+                      outOfStock && "text-rose-300 disabled:opacity-100"
+                    )}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
-                {limitReached && (
+                {showLimitWarning && (
                   <div className="text-xs text-amber-600">
                     Max available reached
                   </div>
                 )}
                 <Button
-                  disabled={!inStock}
-                  className="flex-1 bg-pink-600 hover:bg-pink-700"
+                  disabled={outOfStock}
+                  className={cn(
+                    "flex-1",
+                    outOfStock
+                      ? "bg-rose-600 text-white hover:bg-rose-600 disabled:opacity-100"
+                      : "bg-pink-600 hover:bg-pink-700"
+                  )}
                   onClick={handleAddToCart}
                 >
-                  Add to cart
+                  {outOfStock ? "Out of stock" : "Add to cart"}
                 </Button>
               </div>
+              {outOfStock && (
+                <div className="mt-2 text-xs font-medium text-rose-600">
+                  This variation is currently unavailable.
+                </div>
+              )}
               <Button
-                disabled={!inStock}
+                disabled={outOfStock}
                 variant="outline"
-                className="mt-3 w-full"
+                className={cn(
+                  "mt-3 w-full",
+                  outOfStock && "border-rose-200 text-rose-400"
+                )}
                 onClick={handleBuyNow}
               >
-                Buy now
+                {outOfStock ? "Unavailable" : "Buy now"}
               </Button>
 
               <div className="mt-6 grid grid-cols-3 gap-2 text-xs text-gray-600">
@@ -382,7 +503,13 @@ export function ProductDetail({ product }: ProductDetailProps) {
       <section className="mx-auto max-w-7xl px-4 pb-12">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-12">
           <div className="lg:col-span-7">
-            <Accordion type="single" collapsible className="space-y-4">
+            <Accordion
+              type="single"
+              collapsible
+              value={accordionValue}
+              onValueChange={(value) => setAccordionValue(value || null)}
+              className="space-y-4"
+            >
               <AccordionItem value="desc">
                 <AccordionTrigger>About this fragrance</AccordionTrigger>
                 <AccordionContent>
@@ -391,40 +518,131 @@ export function ProductDetail({ product }: ProductDetailProps) {
                   </p>
                 </AccordionContent>
               </AccordionItem>
-              <AccordionItem value="notes">
+              <AccordionItem value="notes" id="notes" className="scroll-mt-28">
                 <AccordionTrigger>Fragrance notes</AccordionTrigger>
                 <AccordionContent>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <Card className="gap-0 rounded-xl border border-gray-200 p-0">
-                      <CardContent className="p-4">
-                        <div className="text-xs text-gray-500">TOP</div>
-                        <div className="mt-1 space-y-1 font-medium">
-                          {product.notes.top.map((note) => (
-                            <div key={note}>{note}</div>
-                          ))}
+                  <div className="space-y-6">
+                    <div className="overflow-hidden rounded-[2rem] border border-white/60 bg-white shadow-sm ring-1 ring-rose-100/60">
+                      <div className="grid gap-4 p-6 md:grid-cols-3 md:p-8">
+                        {noteSections.map((section, index) => (
+                          <div
+                            key={section.id}
+                            className="relative overflow-hidden rounded-2xl border border-white/60 bg-white/70 p-5 shadow-sm"
+                          >
+                            <div
+                              className={`absolute inset-0 -z-10 bg-gradient-to-br ${section.accent} opacity-80`}
+                            />
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold uppercase tracking-[0.35em] text-pink-500">
+                                0{index + 1}
+                              </span>
+                              <span className="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-[0.65rem] uppercase tracking-wide text-gray-500">
+                                {section.caption}
+                              </span>
+                            </div>
+                            <h4 className="mt-4 text-lg font-semibold text-gray-900">
+                              {section.label}
+                            </h4>
+                            <ul className="mt-3 space-y-2 text-sm font-medium text-gray-800">
+                              {section.notes.map((note) => (
+                                <li key={note} className="flex items-center gap-2">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-pink-400" />
+                                  {note}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-[1.75rem] border border-gray-200 bg-white/80 p-6 shadow-sm backdrop-blur">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.3em] text-pink-500">
+                            Layering ritual
+                          </p>
+                          <h4 className="mt-2 text-lg font-semibold text-gray-900">
+                            How to wear {product.title}
+                          </h4>
                         </div>
-                      </CardContent>
-                    </Card>
-                    <Card className="gap-0 rounded-xl border border-gray-200 p-0">
-                      <CardContent className="p-4">
-                        <div className="text-xs text-gray-500">HEART</div>
-                        <div className="mt-1 space-y-1 font-medium">
-                          {product.notes.heart.map((note) => (
-                            <div key={note}>{note}</div>
-                          ))}
+                        <span className="hidden rounded-full bg-pink-100 px-3 py-1 text-xs font-semibold text-pink-700 sm:inline-flex">
+                          Evening ready
+                        </span>
+                      </div>
+                      <ul className="mt-5 space-y-4 text-sm text-gray-600">
+                        {layeringSuggestions.map((suggestion, index) => (
+                          <li
+                            key={`${suggestion.title}-${index}`}
+                            className="flex gap-3 rounded-2xl border border-gray-200/70 bg-white/70 p-4 shadow-sm"
+                          >
+                            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-pink-100 text-xs font-semibold text-pink-700">
+                              {index + 1}
+                            </span>
+                            <div className="flex-1 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-medium text-gray-800">
+                                  {suggestion.title}
+                                </p>
+                                {suggestion.related ? (
+                                  <span className="rounded-full bg-pink-50 px-2.5 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-pink-600">
+                                    ${suggestion.related.price}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p>{suggestion.description}</p>
+                              {suggestion.related ? (
+                                <p className="text-xs text-gray-500">
+                                  Pair with: {suggestion.related.name}
+                                </p>
+                              ) : null}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      {product.related.length > 0 ? (
+                        <div className="mt-6 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-5">
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.35em] text-pink-500">
+                                Can be layered with
+                              </p>
+                              <p className="text-sm text-gray-600">
+                                Add a second veil to deepen or brighten the accord.
+                              </p>
+                            </div>
+                            <span className="hidden text-xs font-medium text-gray-400 sm:block">
+                              Limited atelier allocations
+                            </span>
+                          </div>
+                          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            {product.related.slice(0, 3).map((item) => (
+                              <div
+                                key={item.id}
+                                className="group flex items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-pink-200 hover:shadow-md"
+                              >
+                                <div className="relative h-14 w-14 overflow-hidden rounded-xl bg-gray-100">
+                                  <Image
+                                    src={item.image}
+                                    alt={item.name}
+                                    fill
+                                    sizes="56px"
+                                    className="object-cover"
+                                  />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-semibold text-gray-800 group-hover:text-pink-600">
+                                    {item.name}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    ${item.price}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                    <Card className="gap-0 rounded-xl border border-gray-200 p-0">
-                      <CardContent className="p-4">
-                        <div className="text-xs text-gray-500">BASE</div>
-                        <div className="mt-1 space-y-1 font-medium">
-                          {product.notes.base.map((note) => (
-                            <div key={note}>{note}</div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
+                      ) : null}
+                    </div>
                   </div>
                 </AccordionContent>
               </AccordionItem>
