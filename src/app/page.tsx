@@ -15,6 +15,7 @@ import { CartIndicator } from "@/components/cart-indicator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SiteSearchBar } from "@/components/site-search-bar";
+import { MobileNav } from "@/components/mobile-nav";
 import { getHomePageData } from "@/data/home";
 import { cn } from "@/lib/utils";
 
@@ -38,7 +39,7 @@ export default async function Home() {
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
-      <header className="border-b bg-white/80 backdrop-blur">
+      <header className="relative z-40 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-5">
           <Link
             href="/"
@@ -47,7 +48,7 @@ export default async function Home() {
           >
             The Smelly Water Club
           </Link>
-          <nav className="hidden items-center gap-6 text-sm text-gray-600 md:flex">
+          <nav className="hidden items-center gap-6 text-sm text-gray-600 lg:flex">
             <Link href="/products" className="transition hover:text-gray-900">
               Collection
             </Link>
@@ -65,6 +66,7 @@ export default async function Home() {
             </Link>
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <MobileNav />
             <SiteSearchBar
               placeholder="Search fragrances, rituals, stories…"
               className="hidden md:flex md:w-72 lg:w-80"
@@ -75,7 +77,7 @@ export default async function Home() {
         </div>
       </header>
 
-      <div className="border-b border-gray-200 bg-white px-4 py-3 md:hidden">
+      <div className="relative z-30 border-b border-gray-200 bg-white px-4 py-3 md:hidden">
         <SiteSearchBar placeholder="Search fragrances, rituals, stories…" className="w-full" />
       </div>
 

@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { AccountButton } from "@/components/account-button";
 import { CartIndicator } from "@/components/cart-indicator";
+import { SiteSearchBar } from "@/components/site-search-bar";
+import { MobileNav } from "@/components/mobile-nav";
 import { getHomePageData } from "@/data/home";
 import { products } from "@/data/products";
 import {
@@ -37,7 +39,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
-      <header className="border-b bg-white/80 backdrop-blur">
+      <header className="relative z-40 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-5">
           <Link
             href="/"
@@ -46,7 +48,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           >
             The Smelly Water Club
           </Link>
-          <nav className="hidden items-center gap-6 text-sm text-gray-600 md:flex">
+          <nav className="hidden items-center gap-6 text-sm text-gray-600 lg:flex">
             <Link href="/products" className="transition hover:text-gray-900">
               Collection
             </Link>
@@ -64,11 +66,24 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             </Link>
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <MobileNav />
+            <SiteSearchBar
+              placeholder="Search fragrances, rituals, stories…"
+              className="hidden md:flex md:w-72 lg:w-80"
+              initialValue={initialQuery}
+            />
             <AccountButton className="hidden sm:inline-flex" />
             <CartIndicator />
           </div>
         </div>
       </header>
+      <div className="relative z-30 border-b border-gray-200 bg-white px-4 py-3 md:hidden">
+        <SiteSearchBar
+          placeholder="Search fragrances, rituals, stories…"
+          className="w-full"
+          initialValue={initialQuery}
+        />
+      </div>
 
       <SearchPageContent
         initialQuery={initialQuery}

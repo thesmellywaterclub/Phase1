@@ -9,16 +9,22 @@ type SiteSearchBarProps = {
   placeholder?: string;
   className?: string;
   autoFocus?: boolean;
+  initialValue?: string;
 };
 
 export function SiteSearchBar({
   placeholder = "Search the atelier…",
   className,
   autoFocus,
+  initialValue,
 }: SiteSearchBarProps) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initialValue ?? "");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const router = useRouter();
+
+  useEffect(() => {
+    setValue(initialValue ?? "");
+  }, [initialValue]);
 
   useEffect(() => {
     let isMounted = true;

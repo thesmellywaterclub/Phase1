@@ -13,7 +13,6 @@ import {
 import { ArrowUpRight } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 
-import { SearchBar } from "@/components/search-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type {
@@ -196,10 +195,9 @@ export function SearchPageContent({
     initialState.results,
   );
   const [tokens, setTokens] = useState<string[]>(initialState.tokens);
-  const [isFetching, setIsFetching] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const isInitialRender = useRef(true);
 
   useEffect(() => {
@@ -231,7 +229,6 @@ export function SearchPageContent({
 
     const timeout = window.setTimeout(async () => {
       try {
-        setIsFetching(true);
         const response = await fetch(requestUrl, {
           signal: controller.signal,
         });
@@ -249,10 +246,6 @@ export function SearchPageContent({
         if (!isAbort) {
           console.error("Failed to fetch search results", error);
         }
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsFetching(false);
-        }
       }
     }, 250);
 
@@ -263,14 +256,6 @@ export function SearchPageContent({
   }, [inputValue, pathname, router, startTransition]);
 
   const handleSuggestion = (value: string) => {
-    setInputValue(value);
-  };
-
-  const handleClear = () => {
-    setInputValue("");
-  };
-
-  const handleSubmit = (value: string) => {
     setInputValue(value);
   };
 
@@ -292,18 +277,9 @@ export function SearchPageContent({
                 Discover compositions, rituals, and stories in one place.
               </h1>
               <p className="text-sm text-gray-600 md:text-base">
-                Use the search to browse our eau de parfums, layering rituals,
-                and journal features curated by the atelier.
+                Browse our eau de parfums, layering rituals, and journal features curated by the atelier.
               </p>
             </div>
-            <SearchBar
-              value={inputValue}
-              onValueChange={setInputValue}
-              onSubmit={handleSubmit}
-              onClear={handleClear}
-              isLoading={isFetching || isPending}
-              ariaLabel="Search The Smelly Water Club"
-            />
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs uppercase tracking-[0.3em] text-gray-400">
                 Trending
