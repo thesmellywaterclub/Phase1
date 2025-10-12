@@ -77,7 +77,7 @@ export function MobileNav({ className }: MobileNavProps) {
       <>
         <div
           className={cn(
-            "fixed inset-0 z-[150] bg-black/40 backdrop-blur-sm transition-opacity duration-300 md:hidden",
+            "fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm transition-opacity duration-300 md:hidden",
             open ? "opacity-100 pointer-events-auto" : "pointer-events-none opacity-0",
           )}
           aria-hidden="true"
@@ -85,7 +85,7 @@ export function MobileNav({ className }: MobileNavProps) {
         />
         <aside
           className={cn(
-            "fixed inset-y-0 right-0 z-[160] flex w-80 max-w-full flex-col bg-white shadow-2xl transition-transform duration-300 ease-out md:hidden",
+            "fixed inset-y-0 right-0 z-[130] flex w-80 max-w-full flex-col bg-white shadow-2xl transition-transform duration-300 ease-out md:hidden",
             open ? "translate-x-0" : "translate-x-full",
           )}
           aria-hidden={!open}
