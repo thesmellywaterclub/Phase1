@@ -1,5 +1,5 @@
-import type { Product } from "./products";
-import { products } from "./products";
+import type { Product } from "./products"
+import { getPrimaryMedia, products } from "./products"
 
 export type HomeHero = {
   eyebrow: string;
@@ -45,9 +45,25 @@ export type HomeMembershipPerk = {
   description: string;
 };
 
+export type HomeProductGalleryItem = {
+  id: string;
+  title: string;
+  brandName: string;
+  gender: Product["gender"];
+  href: string;
+  image: {
+    url: string;
+    alt: string | null;
+  };
+  lowestPricePaise: number | null;
+  ratingAvg: number;
+  ratingCount: number;
+};
+
 export type HomePageData = {
   hero: HomeHero;
   featuredProducts: Product[];
+  productGallery: HomeProductGalleryItem[];
   highlights: HomeHighlight[];
   rituals: HomeRitual[];
   journal: HomeJournalEntry[];
@@ -58,7 +74,31 @@ export type HomePageData = {
   };
 };
 
-const homeData: HomePageData = {
+const homeStaticHeroFallback =
+  "https://images.unsplash.com/photo-1573537805874-4cedc5d389ce?auto=format&fit=crop&w=1400&q=80";
+
+function mapProductToGalleryItem(product: Product): HomeProductGalleryItem {
+  const primaryMedia = getPrimaryMedia(product);
+  return {
+    id: product.id,
+    title: product.title,
+    brandName: product.brand.name,
+    gender: product.gender,
+    href: `/products/${product.slug}`,
+    image: primaryMedia
+      ? { url: primaryMedia.url, alt: primaryMedia.alt }
+      : { url: homeStaticHeroFallback, alt: null },
+    lowestPricePaise: product.aggregates.lowPricePaise,
+    ratingAvg: product.aggregates.ratingAvg,
+    ratingCount: product.aggregates.ratingCount,
+  };
+}
+
+const fallbackFeaturedProducts = products.slice(0, 4);
+
+const fallbackProductGallery = fallbackFeaturedProducts.map(mapProductToGalleryItem);
+
+const fallbackHomeData: HomePageData = {
   hero: {
     eyebrow: "The Season of Velvet Rituals",
     heading: "Fragrances composed for evenings that linger.",
@@ -75,10 +115,10 @@ const homeData: HomePageData = {
         href: "/login",
       },
     ],
-    image:
-      "https://images.unsplash.com/photo-1573537805874-4cedc5d389ce?auto=format&fit=crop&w=1400&q=80",
+    image: homeStaticHeroFallback,
   },
-  featuredProducts: products.slice(0, 3),
+  featuredProducts: fallbackFeaturedProducts,
+  productGallery: fallbackProductGallery,
   highlights: [
     {
       id: "atelier",
@@ -206,9 +246,62 @@ const homeData: HomePageData = {
       },
     ],
   },
-};
+}
+
+function getApiBaseUrl(): string | null {
+  const explicit =
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? null
+
+  if (explicit) {
+    return explicit.replace(/\/+$/, "")
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    return "http://localhost:4000"
+  }
+
+  return null
+}
+
+async function fetchHomeDataFromApi(): Promise<HomePageData | null> {
+  const baseUrl = getApiBaseUrl()
+
+  if (!baseUrl) {
+    return null
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/api/home?featuredLimit=4`, {
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    })
+
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`)
+    }
+
+    const body = (await response.json()) as { data?: HomePageData }
+    if (!body?.data) {
+      throw new Error("Response payload missing data property")
+    }
+
+    return body.data
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[home] Falling back to static data", error)
+    }
+    return null
+  }
+}
 
 export async function getHomePageData(): Promise<HomePageData> {
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  return JSON.parse(JSON.stringify(homeData));
+  const apiData = await fetchHomeDataFromApi()
+  if (apiData) {
+    return apiData
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  return JSON.parse(JSON.stringify(fallbackHomeData))
 }

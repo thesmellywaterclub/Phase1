@@ -30,32 +30,117 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import type { Product, RelatedProduct } from "@/data/products";
+import type { Product, ProductVariant } from "@/data/products";
+import { getPrimaryMedia, products } from "@/data/products";
 import { CartIndicator } from "@/components/cart-indicator";
 import { useCartStore } from "@/lib/cart-store";
 import { AccountButton } from "@/components/account-button";
 import { SiteSearchBar } from "@/components/site-search-bar";
 import { cn } from "@/lib/utils";
+import { formatPaise } from "@/lib/money";
 
 type ProductDetailProps = {
   product: Product;
 };
 
+function getAvailableUnits(variant: ProductVariant): number {
+  if (!variant.inventory) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(0, variant.inventory.stock - variant.inventory.reserved);
+}
+
+function isVariantInStock(variant: ProductVariant): boolean {
+  const available = getAvailableUnits(variant);
+  return Number.isFinite(available) ? available > 0 : true;
+}
+
+function getVariantPrice(variant: ProductVariant): number {
+  return variant.salePaise ?? variant.mrpPaise;
+}
+
+const FALLBACK_IMAGE_URL =
+  "https://via.placeholder.com/800x800.png?text=Fragrance";
+
+function formatGenderLabel(gender: Product["gender"]): string {
+  switch (gender) {
+    case "men":
+      return "For Men";
+    case "women":
+      return "For Women";
+    case "unisex":
+      return "Unisex";
+    default:
+      return "For All";
+  }
+}
+
+type LayeringSuggestion = {
+  title: string;
+  description: string;
+  relatedProduct?: Product;
+};
+
 export function ProductDetail({ product }: ProductDetailProps) {
   const [variant, setVariant] = useState(product.variants[0]);
   const [qty, setQty] = useState(1);
-  const inStock = variant.stock > 0;
+  const availableUnits = getAvailableUnits(variant);
+  const inStock = isVariantInStock(variant);
 
   const [subscribe, setSubscribe] = useState(false);
   const subDiscount = 0.15;
-  const price = subscribe
-    ? Math.round(variant.price * (1 - subDiscount))
-    : variant.price;
+  const basePrice = getVariantPrice(variant);
+  const priceAmount = subscribe
+    ? Math.round(basePrice * (1 - subDiscount))
+    : basePrice;
+  const compareAtPrice =
+    variant.salePaise !== null && variant.salePaise !== undefined
+      ? variant.mrpPaise
+      : null;
+
+  const primaryMedia = getPrimaryMedia(product);
+  const galleryMedia =
+    product.media.length > 0
+      ? product.media
+      : [
+          {
+            id: "fallback-media",
+            url: primaryMedia?.url ?? FALLBACK_IMAGE_URL,
+            alt: primaryMedia?.alt ?? product.title,
+            sortOrder: 0,
+            isPrimary: true,
+          },
+        ];
 
   const [active, setActive] = useState(0);
-  const next = () => setActive((i) => (i + 1) % product.images.length);
+  const mediaCount = galleryMedia.length;
+  const next = () =>
+    setActive((index) =>
+      mediaCount === 0 ? index : (index + 1) % mediaCount
+    );
   const prev = () =>
-    setActive((i) => (i - 1 + product.images.length) % product.images.length);
+    setActive((index) =>
+      mediaCount === 0 ? index : (index - 1 + mediaCount) % mediaCount
+    );
+
+  const formattedPrice = formatPaise(priceAmount, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+  const formattedCompareAt =
+    compareAtPrice !== null
+      ? formatPaise(compareAtPrice, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        })
+      : null;
+  const stockBadgeLabel = inStock
+    ? Number.isFinite(availableUnits)
+      ? `In stock (${availableUnits})`
+      : "In stock"
+    : "Out of stock";
+  const ratingAverageDisplay = product.aggregates.ratingAvg.toFixed(1);
+  const ratingCount = product.aggregates.ratingCount;
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState({ show: false, x: 50, y: 50 });
@@ -63,8 +148,9 @@ export function ProductDetail({ product }: ProductDetailProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const variantParam = searchParams.get("variant");
-  const maxQty = variant.stock ?? Number.POSITIVE_INFINITY;
-  const limitReached = Number.isFinite(maxQty) && qty >= maxQty;
+  const maxQty = getAvailableUnits(variant);
+  const finiteLimit = Number.isFinite(maxQty);
+  const limitReached = finiteLimit && maxQty > 0 && qty >= maxQty;
   const showLimitWarning = inStock && limitReached;
   const outOfStock = !inStock;
   const [accordionValue, setAccordionValue] = useState<string | null>(null);
@@ -91,19 +177,27 @@ export function ProductDetail({ product }: ProductDetailProps) {
       accent: "from-amber-100/70 via-amber-50/60 to-white",
     },
   ];
-  const layeringSuggestions = [
+  const relatedProducts = products
+    .filter(
+      (item) =>
+        item.slug !== product.slug &&
+        (item.brand.id === product.brand.id || item.gender === product.gender)
+    )
+    .slice(0, 4);
+
+  const layeringSuggestions: LayeringSuggestion[] = [
     {
       title: "Prime the pulse points",
       description: `Warm wrists and collarbone so ${product.notes.top
         .slice(0, 2)
         .join(" & ")} diffuse with brightness.`,
     },
-    product.related[0]
-      ? ({
-          title: `Veil with ${product.related[0].name}`,
-          description: `Mist a light cloud of ${product.related[0].name} to echo the ${product.notes.heart[0]?.toLowerCase() ?? "heart"} accord.`,
-          related: product.related[0],
-        } satisfies { title: string; description: string; related: RelatedProduct })
+    relatedProducts[0]
+      ? {
+          title: `Veil with ${relatedProducts[0].title}`,
+          description: `Mist a light cloud of ${relatedProducts[0].title} to echo the ${product.notes.heart[0]?.toLowerCase() ?? "heart"} accord.`,
+          relatedProduct: relatedProducts[0],
+        }
       : null,
     {
       title: "Finish with a floating mist",
@@ -111,14 +205,18 @@ export function ProductDetail({ product }: ProductDetailProps) {
         .slice(0, 2)
         .join(" & ")}.`,
     },
-  ].filter((item): item is { title: string; description: string; related?: RelatedProduct } => item !== null);
+  ].filter((item): item is LayeringSuggestion => item !== null);
 
   useEffect(() => {
     setQty((current) => {
-      if (!variant.stock) {
+      const available = getAvailableUnits(variant);
+      if (!isVariantInStock(variant)) {
         return 0;
       }
-      return Math.max(1, Math.min(current, variant.stock));
+      if (Number.isFinite(available)) {
+        return Math.max(1, Math.min(current, available));
+      }
+      return Math.max(1, current);
     });
   }, [variant]);
 
@@ -128,6 +226,16 @@ export function ProductDetail({ product }: ProductDetailProps) {
     if (!matched) return;
     setVariant((current) => (current.id === matched.id ? current : matched));
   }, [variantParam, product.variants]);
+
+  useEffect(() => {
+    if (mediaCount === 0) {
+      setActive(0);
+      return;
+    }
+    if (active >= mediaCount) {
+      setActive(0);
+    }
+  }, [mediaCount, active]);
 
   const focusNotesSection = useCallback(() => {
     if (typeof window === "undefined") {
@@ -212,24 +320,26 @@ export function ProductDetail({ product }: ProductDetailProps) {
             <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
               {product.title}
             </h1>
-            <p className="text-gray-600">{product.subtitle}</p>
+            <p className="text-gray-600">
+              {product.brand.name} · {formatGenderLabel(product.gender)}
+            </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <div className="flex items-center text-sm text-amber-600">
                 <Star className="h-4 w-4 fill-current" />
-                <span className="ml-1 font-medium">{product.rating}</span>
+                <span className="ml-1 font-medium">
+                  {product.aggregates.ratingAvg.toFixed(1)}
+                </span>
                 <span className="ml-1 text-gray-500">
-                  ({product.ratingsCount})
+                  ({product.aggregates.ratingCount})
                 </span>
               </div>
-              {product.badges.map((badge) => (
-                <Badge
-                  key={badge}
-                  className="border-none bg-pink-100 text-pink-700"
-                >
-                  {badge}
-                </Badge>
-              ))}
-              <span className="text-xs text-gray-400">SKU: {product.sku}</span>
+              <Badge className="border-none bg-pink-100 text-pink-700">
+                {product.brand.name}
+              </Badge>
+              <Badge className="border-none bg-rose-100 text-rose-700">
+                {formatGenderLabel(product.gender)}
+              </Badge>
+              <span className="text-xs text-gray-400">SKU: {variant.sku}</span>
             </div>
           </div>
           <div className="hidden items-center gap-3 text-sm text-gray-600 md:flex">
@@ -249,8 +359,8 @@ export function ProductDetail({ product }: ProductDetailProps) {
         <section className="lg:col-span-7">
           <div className="relative aspect-square overflow-hidden rounded-2xl bg-gray-100 lg:hidden">
             <img
-              src={product.images[active]}
-              alt="Product view"
+              src={galleryMedia[active]?.url ?? FALLBACK_IMAGE_URL}
+              alt={galleryMedia[active]?.alt ?? `${product.title} view`}
               className="h-full w-full object-cover"
             />
             <button
@@ -267,9 +377,9 @@ export function ProductDetail({ product }: ProductDetailProps) {
             </button>
           </div>
           <div className="mt-3 flex gap-2 overflow-x-auto lg:hidden">
-            {product.images.map((src, index) => (
+            {galleryMedia.map((media, index) => (
               <button
-                key={src}
+                key={media.id}
                 onClick={() => setActive(index)}
                 className={`min-w-20 overflow-hidden rounded-xl border ${
                   index === active
@@ -277,15 +387,19 @@ export function ProductDetail({ product }: ProductDetailProps) {
                     : "border-transparent hover:border-gray-300"
                 }`}
               >
-                <img src={src} alt="" className="h-20 w-20 object-cover" />
+                <img
+                  src={media.url}
+                  alt={media.alt ?? product.title}
+                  className="h-20 w-20 object-cover"
+                />
               </button>
             ))}
           </div>
 
           <div className="hidden grid-cols-2 gap-4 lg:grid">
-            {product.images.slice(0, 4).map((src, index) => (
+            {galleryMedia.slice(0, 4).map((media, index) => (
               <div
-                key={src}
+                key={media.id}
                 ref={index === 0 ? wrapRef : undefined}
                 onMouseEnter={() =>
                   setZoom((z) => ({ ...z, show: index === 0 }))
@@ -301,8 +415,8 @@ export function ProductDetail({ product }: ProductDetailProps) {
                 className="relative aspect-square overflow-hidden rounded-2xl bg-gray-100"
               >
                 <img
-                  src={src}
-                  alt="Gallery view"
+                  src={media.url}
+                  alt={media.alt ?? `${product.title} gallery view`}
                   className="h-full w-full object-cover"
                 />
                 {index === 0 && zoom.show && (
@@ -311,7 +425,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
                     style={{
                       left: `${zoom.x}%`,
                       top: `${zoom.y}%`,
-                      backgroundImage: `url(${src})`,
+                      backgroundImage: `url(${media.url})`,
                       backgroundSize: `220% 220%`,
                       backgroundPosition: `${zoom.x}% ${zoom.y}%`,
                     }}
@@ -321,8 +435,12 @@ export function ProductDetail({ product }: ProductDetailProps) {
             ))}
             <div className="col-span-2 overflow-hidden rounded-2xl bg-gray-100">
               <img
-                src={product.images[4] ?? product.images[0]}
-                alt="Detail view"
+                src={
+                  galleryMedia[4]?.url ??
+                  galleryMedia[0]?.url ??
+                  FALLBACK_IMAGE_URL
+                }
+                alt={galleryMedia[4]?.alt ?? galleryMedia[0]?.alt ?? product.title}
                 className="h-[520px] w-full object-cover"
               />
             </div>
@@ -335,10 +453,10 @@ export function ProductDetail({ product }: ProductDetailProps) {
               <div className="flex items-end justify-between">
                 <div>
                   <div className="flex items-end gap-3">
-                    <span className="text-3xl font-bold">${price}</span>
-                    {variant.compareAt && (
+                    <span className="text-3xl font-bold">{formattedPrice}</span>
+                    {formattedCompareAt && (
                       <span className="text-gray-400 line-through">
-                        ${variant.compareAt}
+                        {formattedCompareAt}
                       </span>
                     )}
                   </div>
@@ -355,7 +473,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
                       : "bg-amber-100 text-amber-700"
                   }`}
                 >
-                  {inStock ? `In stock (${variant.stock})` : "Out of stock"}
+                  {stockBadgeLabel}
                 </Badge>
               </div>
 
@@ -379,8 +497,14 @@ export function ProductDetail({ product }: ProductDetailProps) {
                 <div className="mb-2 text-sm font-medium">Size</div>
                 <div className="flex flex-wrap gap-2">
                   {product.variants.map((option) => {
-                    const optionInStock = option.stock > 0;
+                    const optionInStock = isVariantInStock(option);
+                    const available = getAvailableUnits(option);
                     const isActive = variant.id === option.id;
+                    const optionLabel = `${option.sizeMl} ml`;
+                    const optionPriceLabel = formatPaise(getVariantPrice(option), {
+                      minimumFractionDigits: 0,
+                      maximumFractionDigits: 0,
+                    });
                     return (
                       <button
                         key={option.id}
@@ -399,10 +523,20 @@ export function ProductDetail({ product }: ProductDetailProps) {
                         )}
                         aria-pressed={isActive}
                       >
-                        <span>{option.label}</span>
+                        <div className="flex items-center gap-2">
+                          <span>{optionLabel}</span>
+                          <span className="text-xs text-gray-500">
+                            {optionPriceLabel}
+                          </span>
+                        </div>
                         {!optionInStock && (
                           <span className="ml-2 rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-rose-600">
                             Sold out
+                          </span>
+                        )}
+                        {optionInStock && Number.isFinite(available) && available <= 3 && (
+                          <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-amber-600">
+                            {available} left
                           </span>
                         )}
                       </button>
@@ -414,7 +548,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
               <div className="mt-5 flex items-center gap-3 text-sm text-gray-700">
                 <Truck className="h-5 w-5" />
                 <div>
-                  <div>Free express shipping over $99</div>
+                  <div>Free express shipping over ₹9,999</div>
                   <div className="text-gray-500">
                     Estimated delivery: 2–4 business days
                   </div>
@@ -597,23 +731,26 @@ export function ProductDetail({ product }: ProductDetailProps) {
                                 <p className="font-medium text-gray-800">
                                   {suggestion.title}
                                 </p>
-                                {suggestion.related ? (
+                                {suggestion.relatedProduct ? (
                                   <span className="rounded-full bg-pink-50 px-2.5 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-pink-600">
-                                    ${suggestion.related.price}
+                                    {formatPaise(
+                                      suggestion.relatedProduct.aggregates.lowPricePaise,
+                                      { minimumFractionDigits: 0, maximumFractionDigits: 0 }
+                                    )}
                                   </span>
                                 ) : null}
                               </div>
                               <p>{suggestion.description}</p>
-                              {suggestion.related ? (
+                              {suggestion.relatedProduct ? (
                                 <p className="text-xs text-gray-500">
-                                  Pair with: {suggestion.related.name}
+                                  Pair with: {suggestion.relatedProduct.title}
                                 </p>
                               ) : null}
                             </div>
                           </li>
                         ))}
                       </ul>
-                      {product.related.length > 0 ? (
+                      {relatedProducts.length > 0 ? (
                         <div className="mt-6 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-5">
                           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                             <div>
@@ -629,30 +766,37 @@ export function ProductDetail({ product }: ProductDetailProps) {
                             </span>
                           </div>
                           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                            {product.related.slice(0, 3).map((item) => (
-                              <div
-                                key={item.id}
-                                className="group flex items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-pink-200 hover:shadow-md"
-                              >
-                                <div className="relative h-14 w-14 overflow-hidden rounded-xl bg-gray-100">
-                                  <Image
-                                    src={item.image}
-                                    alt={item.name}
-                                    fill
-                                    sizes="56px"
-                                    className="object-cover"
-                                  />
+                            {relatedProducts.slice(0, 3).map((item) => {
+                              const itemMedia = getPrimaryMedia(item);
+                              const itemPrice = formatPaise(
+                                item.aggregates.lowPricePaise,
+                                { minimumFractionDigits: 0, maximumFractionDigits: 0 }
+                              );
+                              return (
+                                <div
+                                  key={item.id}
+                                  className="group flex items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-pink-200 hover:shadow-md"
+                                >
+                                  <div className="relative h-14 w-14 overflow-hidden rounded-xl bg-gray-100">
+                                    <Image
+                                      src={itemMedia?.url ?? FALLBACK_IMAGE_URL}
+                                      alt={itemMedia?.alt ?? item.title}
+                                      fill
+                                      sizes="56px"
+                                      className="object-cover"
+                                    />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-semibold text-gray-800 group-hover:text-pink-600">
+                                      {item.title}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      {itemPrice}
+                                    </p>
+                                  </div>
                                 </div>
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-sm font-semibold text-gray-800 group-hover:text-pink-600">
-                                    {item.name}
-                                  </p>
-                                  <p className="text-xs text-gray-500">
-                                    ${item.price}
-                                  </p>
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       ) : null}
@@ -663,13 +807,35 @@ export function ProductDetail({ product }: ProductDetailProps) {
               <AccordionItem value="ingredients">
                 <AccordionTrigger>Ingredients</AccordionTrigger>
                 <AccordionContent>
-                  <p className="text-gray-700">{product.ingredients}</p>
+                  <div className="space-y-3 text-sm text-gray-700">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-gray-400">
+                        Top Accord
+                      </p>
+                      <p>{product.notes.top.join(", ") || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-gray-400">
+                        Heart Accord
+                      </p>
+                      <p>{product.notes.heart.join(", ") || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-gray-400">
+                        Base Accord
+                      </p>
+                      <p>{product.notes.base.join(", ") || "—"}</p>
+                    </div>
+                  </div>
                 </AccordionContent>
               </AccordionItem>
               <AccordionItem value="returns">
                 <AccordionTrigger>Returns &amp; Warranty</AccordionTrigger>
                 <AccordionContent>
-                  <p className="text-gray-700">{product.returns}</p>
+                  <p className="text-gray-700">
+                    Complimentary returns within 30 days for unopened bottles.
+                    Contact concierge@thesmellywaterclub.com for a prepaid label.
+                  </p>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
@@ -679,11 +845,11 @@ export function ProductDetail({ product }: ProductDetailProps) {
             <Card className="gap-0 rounded-2xl border border-gray-200 p-0">
               <CardContent className="p-6">
                 <div className="flex items-center gap-3">
-                  <div className="text-4xl font-bold">{product.rating}</div>
+                  <div className="text-4xl font-bold">{ratingAverageDisplay}</div>
                   <div>
                     <div className="text-amber-500">★★★★★</div>
                     <div className="text-sm text-gray-500">
-                      Based on {product.ratingsCount} reviews
+                      Based on {ratingCount} reviews
                     </div>
                   </div>
                 </div>
@@ -731,8 +897,14 @@ export function ProductDetail({ product }: ProductDetailProps) {
       <section className="bg-gray-50 py-12">
         <div className="mx-auto max-w-7xl px-4">
           <h2 className="text-2xl font-semibold">Pairs well with</h2>
-          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
-            {product.related.map((item) => (
+        <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
+          {relatedProducts.map((item) => {
+            const itemMedia = getPrimaryMedia(item);
+            const itemPrice = formatPaise(item.aggregates.lowPricePaise, {
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 0,
+            });
+            return (
               <Card
                 key={item.id}
                 className="gap-0 rounded-2xl border border-gray-200 p-0 transition hover:shadow-md"
@@ -741,19 +913,20 @@ export function ProductDetail({ product }: ProductDetailProps) {
                   <div className="aspect-square overflow-hidden rounded-xl bg-white">
                     <img
                       loading="lazy"
-                      src={item.image}
-                      alt={item.name}
+                      src={itemMedia?.url ?? FALLBACK_IMAGE_URL}
+                      alt={itemMedia?.alt ?? item.title}
                       className="h-full w-full object-cover"
                     />
                   </div>
                   <div className="mt-3 text-sm">
-                    <div className="font-medium">{item.name}</div>
-                    <div className="font-bold text-pink-600">${item.price}</div>
+                    <div className="font-medium">{item.title}</div>
+                    <div className="font-bold text-pink-600">{itemPrice}</div>
                   </div>
                 </CardContent>
               </Card>
-            ))}
-          </div>
+            );
+          })}
+        </div>
         </div>
       </section>
     </div>

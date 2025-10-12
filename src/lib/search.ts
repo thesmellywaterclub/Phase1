@@ -1,5 +1,7 @@
 import type { HomeJournalEntry } from "@/data/home";
 import type { Product } from "@/data/products";
+import { getPrimaryMedia } from "@/data/products";
+import { formatPaise } from "@/lib/money";
 
 export type SearchResultType = "product" | "journal";
 
@@ -30,6 +32,19 @@ export type SearchResultsPayload = {
   results: SearchResultsSet;
 };
 
+function formatGenderLabel(gender: Product["gender"]): string {
+  switch (gender) {
+    case "men":
+      return "For Men";
+    case "women":
+      return "For Women";
+    case "unisex":
+      return "Unisex";
+    default:
+      return "For All";
+  }
+}
+
 export function buildSearchContext(query: string): ProductSearchContext {
   const normalized = query.trim().toLowerCase();
   return {
@@ -47,15 +62,40 @@ export function searchProducts(
 ) {
   const results = products
     .map<SearchResult | null>((product) => {
+      const primaryMedia = getPrimaryMedia(product);
+      const genderLabel = formatGenderLabel(product.gender);
+      const aromaticHighlight = product.notes.top.slice(0, 3).join(" • ");
+      const description = [product.brand.name, genderLabel, aromaticHighlight]
+        .filter(Boolean)
+        .join(" · ");
+      const badges = Array.from(
+        new Set(
+          [
+            product.brand.name,
+            genderLabel,
+            ...product.notes.top.slice(0, 2),
+            ...product.notes.heart.slice(0, 1),
+          ].filter(Boolean),
+        ),
+      );
+      const priceLabel = formatPaise(product.aggregates.lowPricePaise, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      });
+      const ratingLabel = `${product.aggregates.ratingAvg.toFixed(1)} ★ • ${product.aggregates.ratingCount} reviews`;
+      const meta = product.aggregates.lowPricePaise
+        ? `${priceLabel} • ${product.aggregates.ratingAvg.toFixed(1)} ★ • ${product.aggregates.ratingCount} reviews`
+        : ratingLabel;
+
       if (!context.query) {
         return {
           id: product.id,
           title: product.title,
-          description: product.subtitle,
+          description,
           href: `/products/${product.slug}`,
-          image: product.images[0],
-          badges: product.badges,
-          meta: `${product.rating.toFixed(1)} • ${product.ratingsCount} reviews`,
+          image: primaryMedia?.url,
+          badges,
+          meta,
           type: "product" as const,
           score: 0,
         };
@@ -63,10 +103,9 @@ export function searchProducts(
 
       const fields = [
         product.title,
-        product.subtitle,
+        product.brand.name,
+        genderLabel,
         product.description,
-        product.badges.join(" "),
-        product.ingredients,
         product.notes.top.join(" "),
         product.notes.heart.join(" "),
         product.notes.base.join(" "),
@@ -94,9 +133,7 @@ export function searchProducts(
       }
 
       if (
-        product.badges.some((badge) =>
-          badge.toLowerCase().includes(context.query),
-        )
+        badges.some((badge) => badge.toLowerCase().includes(context.query))
       ) {
         score += 0.25;
       }
@@ -104,11 +141,11 @@ export function searchProducts(
       return {
         id: product.id,
         title: product.title,
-        description: product.subtitle,
+        description,
         href: `/products/${product.slug}`,
-        image: product.images[0],
-        badges: product.badges,
-        meta: `${product.rating.toFixed(1)} • ${product.ratingsCount} reviews`,
+        image: primaryMedia?.url,
+        badges,
+        meta,
         type: "product" as const,
         score,
       };
@@ -208,25 +245,15 @@ export function buildSearchSuggestions(
 
   for (const product of products) {
     if (ensureLimit()) break;
-    push(product.subtitle);
+    push(product.brand.name);
   }
 
   for (const product of products) {
     if (ensureLimit()) break;
-    product.badges.forEach((badge) => {
-      if (!ensureLimit()) push(badge);
-    });
+    push(formatGenderLabel(product.gender));
   }
 
-  for (const product of products) {
-    if (ensureLimit()) break;
-    product.ingredients
-      .split(",")
-      .map((ingredient) => ingredient.trim())
-      .forEach((ingredient) => {
-        if (!ensureLimit()) push(ingredient);
-      });
-  }
+  // Use accords as searchable suggestions
 
   for (const product of products) {
     if (ensureLimit()) break;

@@ -38,7 +38,11 @@ function clampQuantity(
   qty: number
 ): number {
   const variant = getProductVariant(productSlug, variantId);
-  const max = variant?.stock ?? Number.POSITIVE_INFINITY;
+  const inventory = variant?.inventory;
+  const max =
+    inventory == null
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, inventory.stock - inventory.reserved);
   if (max <= 0) {
     return 0;
   }

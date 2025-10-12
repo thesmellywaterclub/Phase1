@@ -17,13 +17,15 @@ import { Badge } from "@/components/ui/badge";
 import { SiteSearchBar } from "@/components/site-search-bar";
 import { MobileNav } from "@/components/mobile-nav";
 import { getHomePageData } from "@/data/home";
+import { getPrimaryMedia } from "@/data/products";
 import { cn } from "@/lib/utils";
+import { formatPaise } from "@/lib/money";
 
-const highlightIconMap = {
+const highlightIconMap: Record<string, LucideIcon> = {
   Sparkles,
   Leaf,
   MessagesSquare,
-} satisfies Record<string, LucideIcon>;
+};
 
 type HighlightIconProps = {
   name: string;
@@ -155,6 +157,77 @@ export default async function Home() {
           </div>
         </section>
 
+        {data.productGallery.length > 0 ? (
+          <section className="space-y-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
+                  Fragrance portraits
+                </h2>
+                <p className="text-sm text-gray-600">
+                  A glimpse into the bottles capturing this season&apos;s accords.
+                </p>
+              </div>
+              <Link
+                href="/products"
+                className="inline-flex items-center text-sm font-medium text-pink-600 transition hover:text-pink-700"
+              >
+                Shop the gallery
+                <ArrowUpRight className="ml-1 h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {data.productGallery.map((item) => {
+                const genderLabel =
+                  item.gender === "unisex"
+                    ? "Unisex"
+                    : item.gender === "men"
+                    ? "For Men"
+                    : item.gender === "women"
+                    ? "For Women"
+                    : "For All";
+                const priceLabel =
+                  item.lowestPricePaise !== null
+                    ? formatPaise(item.lowestPricePaise, {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 0,
+                      })
+                    : "Limited release";
+
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    className="group block space-y-3 rounded-[2rem] border border-gray-200 bg-white p-3 transition hover:-translate-y-1 hover:border-pink-200 hover:shadow-lg"
+                  >
+                    <div className="relative aspect-[3/4] overflow-hidden rounded-[1.75rem] bg-gray-100">
+                      <Image
+                        src={item.image.url}
+                        alt={item.image.alt ?? item.title}
+                        fill
+                        className="object-cover transition duration-500 group-hover:scale-105"
+                        sizes="(min-width: 1024px) 20vw, (min-width: 640px) 40vw, 80vw"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-gray-900 group-hover:text-pink-600">
+                        {item.title}
+                      </p>
+                      <p className="text-xs uppercase tracking-[0.3em] text-gray-500">
+                        {item.brandName} · {genderLabel}
+                      </p>
+                      <p className="text-sm text-gray-700">{priceLabel}</p>
+                      <p className="text-xs text-gray-400">
+                        {item.ratingAvg.toFixed(1)} ★ · {item.ratingCount} reviews
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
         <section className="space-y-8">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -177,79 +250,109 @@ export default async function Home() {
           </div>
 
           <div className="grid gap-8 md:grid-cols-2">
-            {data.featuredProducts.map((product) => (
-              <article
-                key={product.id}
-                className="group overflow-hidden rounded-[2rem] border border-gray-200 transition hover:-translate-y-1.5 hover:border-gray-300 hover:shadow-xl"
-              >
-                <div className="relative h-80 overflow-hidden">
-                  <Image
-                    src={product.images[0]}
-                    alt={product.title}
-                    fill
-                    className="object-cover transition duration-700 group-hover:scale-105"
-                    sizes="(min-width: 768px) 50vw, 100vw"
-                  />
-                </div>
-                <div className="space-y-4 p-6">
-                  <div className="flex items-center gap-2">
-                    {product.badges.slice(0, 2).map((badge) => (
-                      <Badge
-                        key={badge}
-                        className="border-none bg-pink-100 text-pink-700"
+            {data.featuredProducts.map((product) => {
+              const primaryMedia = getPrimaryMedia(product);
+              const imageUrl = primaryMedia?.url ?? data.hero.image;
+              const imageAlt = primaryMedia?.alt ?? `${product.title} bottle`;
+              const brandTag = product.brand.name;
+              const genderTag =
+                product.gender === "unisex"
+                  ? "Unisex"
+                  : product.gender === "men"
+                  ? "For Men"
+                  : product.gender === "women"
+                  ? "For Women"
+                  : "For All";
+              const aromaticHighlights = product.notes.top.slice(0, 3);
+
+              return (
+                <article
+                  key={product.id}
+                  className="group overflow-hidden rounded-[2rem] border border-gray-200 transition hover:-translate-y-1.5 hover:border-gray-300 hover:shadow-xl"
+                >
+                  <div className="relative h-80 overflow-hidden">
+                    <Image
+                      src={imageUrl}
+                      alt={imageAlt}
+                      fill
+                      className="object-cover transition duration-700 group-hover:scale-105"
+                      sizes="(min-width: 768px) 50vw, 100vw"
+                    />
+                  </div>
+                  <div className="space-y-4 p-6">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {[brandTag, genderTag].map((tag) => (
+                        <Badge
+                          key={tag}
+                          className="border-none bg-pink-100 text-pink-700"
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-xl font-semibold">{product.title}</h3>
+                      <p className="text-sm uppercase tracking-widest text-gray-400">
+                        {aromaticHighlights.length > 0
+                          ? aromaticHighlights.join(" • ")
+                          : brandTag}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between text-sm text-gray-600">
+                      <span>{product.aggregates.ratingAvg.toFixed(1)} rating</span>
+                      <span>{product.aggregates.ratingCount} reviews</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-sm text-gray-600">
+                      {product.variants.map((variant) => {
+                        const stock = variant.inventory?.stock ?? 0;
+                        const reserved = variant.inventory?.reserved ?? 0;
+                        const available = Math.max(0, stock - reserved);
+                        const inStock = available > 0;
+                        const pricePaise = variant.salePaise ?? variant.mrpPaise;
+                        const displayPrice = formatPaise(pricePaise, {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 0,
+                        });
+
+                        return (
+                          <Link
+                            key={variant.id}
+                            href={`/products/${product.slug}?variant=${encodeURIComponent(variant.id)}`}
+                            className={cn(
+                              "rounded-full border px-3 py-1 transition",
+                              inStock
+                                ? "border-gray-200 hover:border-pink-200 hover:text-pink-600"
+                                : "border-rose-600 bg-rose-600 text-white hover:border-rose-600 hover:bg-rose-600"
+                            )}
+                          >
+                            {inStock
+                              ? `${variant.sizeMl} ml · ${displayPrice}`
+                              : `${variant.sizeMl} ml · Sold out`}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                    <div className="flex flex-col gap-3 pt-2 sm:flex-row">
+                      <Button
+                        asChild
+                        className="flex-1 bg-gray-900 text-white hover:bg-gray-800"
                       >
-                        {badge}
-                      </Badge>
-                    ))}
-                  </div>
-                  <div className="space-y-1">
-                    <h3 className="text-xl font-semibold">{product.title}</h3>
-                    <p className="text-sm uppercase tracking-widest text-gray-400">
-                      {product.subtitle}
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-between text-sm text-gray-600">
-                    <span>{product.rating.toFixed(1)} rating</span>
-                    <span>{product.ratingsCount} reviews</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-sm text-gray-600">
-                    {product.variants.map((variant) => (
-                      <Link
-                        key={variant.id}
-                        href={`/products/${product.slug}?variant=${encodeURIComponent(variant.id)}`}
-                        className={cn(
-                          "rounded-full border px-3 py-1 transition",
-                          variant.stock > 0
-                            ? "border-gray-200 hover:border-pink-200 hover:text-pink-600"
-                            : "border-rose-600 bg-rose-600 text-white hover:border-rose-600 hover:bg-rose-600"
-                        )}
+                        <Link href={`/products/${product.slug}`}>Buy Now</Link>
+                      </Button>
+                      <Button
+                        asChild
+                        variant="outline"
+                        className="flex-1 border-gray-300"
                       >
-                        {variant.stock > 0
-                          ? `${variant.label} · $${variant.price}`
-                          : `${variant.label} · Sold out`}
-                      </Link>
-                    ))}
+                        <Link href={`/products/${product.slug}#notes`}>
+                          Notes & layering
+                        </Link>
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-3 pt-2 sm:flex-row">
-                    <Button
-                      asChild
-                      className="flex-1 bg-gray-900 text-white hover:bg-gray-800"
-                    >
-                      <Link href={`/products/${product.slug}`}>Buy Now</Link>
-                    </Button>
-                    <Button
-                      asChild
-                      variant="outline"
-                      className="flex-1 border-gray-300"
-                    >
-                      <Link href={`/products/${product.slug}#notes`}>
-                        Notes & layering
-                      </Link>
-                    </Button>
-                  </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         </section>
 

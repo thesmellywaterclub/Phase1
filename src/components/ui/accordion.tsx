@@ -10,7 +10,7 @@ type AccordionContextType = {
 
 const AccordionContext = React.createContext<AccordionContextType | null>(null)
 
-type AccordionProps = React.ComponentProps<"div"> & {
+type AccordionProps = Omit<React.ComponentProps<"div">, "defaultValue" | "value"> & {
   type?: "single"
   collapsible?: boolean
   value?: string | null

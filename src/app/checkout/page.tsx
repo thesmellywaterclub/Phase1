@@ -32,18 +32,28 @@ import {
   useCartStore,
 } from "@/lib/cart-store";
 import {
+  type ProductVariant,
+  getPrimaryMedia,
   getProductBySlug,
   getProductVariant,
 } from "@/data/products";
+import { formatPaise } from "@/lib/money";
 
 type DetailedItem = {
   key: string;
   name: string;
   variantLabel: string;
-  price: number;
+  pricePaise: number;
   qty: number;
   image: string;
 };
+
+function getVariantUnitPricePaise(variant: ProductVariant): number {
+  return variant.salePaise ?? variant.mrpPaise;
+}
+
+const FALLBACK_IMAGE_URL =
+  "https://via.placeholder.com/400x400.png?text=Fragrance";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -58,22 +68,24 @@ export default function CheckoutPage() {
           getProductVariant(product.slug, item.variantId) ??
           product.variants[0];
         if (!variant) return null;
+        const media = getPrimaryMedia(product);
         return {
           key: `${product.slug}-${variant.id}`,
           name: product.title,
-          variantLabel: variant.label,
-          price: variant.price,
+          variantLabel: `${variant.sizeMl} ml`,
+          pricePaise: getVariantUnitPricePaise(variant),
           qty: item.qty,
-          image: product.images[0],
+          image: media?.url ?? FALLBACK_IMAGE_URL,
         };
       })
       .filter((entry): entry is DetailedItem => entry !== null);
   }, [items]);
 
-  const subtotal = useMemo(
-    () => detailedItems.reduce((sum, item) => sum + item.price * item.qty, 0),
+  const subtotalPaise = useMemo(
+    () => detailedItems.reduce((sum, item) => sum + item.pricePaise * item.qty, 0),
     [detailedItems]
   );
+  const subtotal = subtotalPaise / 100;
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
@@ -96,10 +108,10 @@ export default function CheckoutPage() {
   const [shipMethod, setShipMethod] = useState<ShipMethod>("standard");
   const shipRate =
     shipMethod === "standard"
-      ? 6.99
+      ? 299
       : shipMethod === "express"
-      ? 12.99
-      : 24.99;
+      ? 599
+      : 999;
   const shipEta =
     shipMethod === "standard"
       ? "3–5 business days"
@@ -123,7 +135,7 @@ export default function CheckoutPage() {
     country: "",
   });
 
-  const tax = Math.round((subtotal + shipRate) * 0.08 * 100) / 100;
+  const tax = Math.round((subtotal + shipRate) * 0.18 * 100) / 100;
   const total = Math.round((subtotal + shipRate + tax) * 100) / 100;
 
   const estDate = useMemo(() => {
@@ -141,7 +153,7 @@ export default function CheckoutPage() {
     const ok =
       shipping.line1.trim().length > 3 &&
       shipping.city.trim().length > 1 &&
-      /\d{5}/.test(shipping.zip);
+      /\d{6}/.test(shipping.zip);
     setAddressValid(ok);
     return ok;
   }
@@ -401,7 +413,12 @@ export default function CheckoutPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="font-semibold">$6.99</div>
+                    <div className="font-semibold">
+                      {formatPaise(299, {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 0,
+                      })}
+                    </div>
                   </label>
 
                   <label className="flex cursor-pointer items-center justify-between rounded-xl border p-3">
@@ -414,7 +431,12 @@ export default function CheckoutPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="font-semibold">$12.99</div>
+                    <div className="font-semibold">
+                      {formatPaise(599, {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 0,
+                      })}
+                    </div>
                   </label>
 
                   <label className="flex cursor-pointer items-center justify-between rounded-xl border p-3">
@@ -427,7 +449,12 @@ export default function CheckoutPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="font-semibold">$24.99</div>
+                    <div className="font-semibold">
+                      {formatPaise(999, {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 0,
+                      })}
+                    </div>
                   </label>
                 </RadioGroup>
 
@@ -744,7 +771,10 @@ export default function CheckoutPage() {
                           </div>
                         </div>
                         <div className="font-semibold">
-                          ${(item.price * item.qty).toFixed(2)}
+                          {formatPaise(item.pricePaise * item.qty, {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 0,
+                          })}
                         </div>
                       </div>
                     ))}
@@ -788,20 +818,20 @@ export default function CheckoutPage() {
               <div className="space-y-2 text-sm text-gray-700">
                 <div className="flex justify-between">
                   <span>Subtotal</span>
-                  <span>${subtotal.toFixed(2)}</span>
+                  <span>{formatPaise(subtotal)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Shipping</span>
-                  <span>${shipRate.toFixed(2)}</span>
+                  <span>{formatPaise(shipRate)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Tax (8%)</span>
-                  <span>${tax.toFixed(2)}</span>
+                  <span>Tax (18%)</span>
+                  <span>{formatPaise(tax)}</span>
                 </div>
                 <Separator />
                 <div className="flex justify-between text-base font-semibold text-gray-900">
                   <span>Total</span>
-                  <span>${total.toFixed(2)}</span>
+                  <span>{formatPaise(total)}</span>
                 </div>
               </div>
               <div className="flex items-center gap-1 text-xs text-gray-500">
