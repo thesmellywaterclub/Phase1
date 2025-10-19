@@ -1,3 +1,4 @@
+import { apiFetch, type ApiResponseEnvelope } from "@/lib/api-client"
 import type { Product } from "./products"
 import { getPrimaryMedia, products } from "./products"
 
@@ -248,46 +249,12 @@ const fallbackHomeData: HomePageData = {
   },
 }
 
-function getApiBaseUrl(): string | null {
-  const explicit =
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? null
-
-  if (explicit) {
-    return explicit.replace(/\/+$/, "")
-  }
-
-  if (process.env.NODE_ENV !== "production") {
-    return "http://localhost:4000"
-  }
-
-  return null
-}
-
 async function fetchHomeDataFromApi(): Promise<HomePageData | null> {
-  const baseUrl = getApiBaseUrl()
-
-  if (!baseUrl) {
-    return null
-  }
-
   try {
-    const response = await fetch(`${baseUrl}/api/home?featuredLimit=4`, {
-      headers: {
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    })
-
-    if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`)
-    }
-
-    const body = (await response.json()) as { data?: HomePageData }
-    if (!body?.data) {
-      throw new Error("Response payload missing data property")
-    }
-
-    return body.data
+    const response = await apiFetch<ApiResponseEnvelope<HomePageData>>(
+      "/api/home?featuredLimit=4",
+    )
+    return response.data
   } catch (error) {
     if (process.env.NODE_ENV !== "production") {
       console.error("[home] Falling back to static data", error)

@@ -6,7 +6,7 @@ import { CartIndicator } from "@/components/cart-indicator";
 import { SiteSearchBar } from "@/components/site-search-bar";
 import { MobileNav } from "@/components/mobile-nav";
 import { getHomePageData } from "@/data/home";
-import { products } from "@/data/products";
+import { fetchProducts } from "@/data/products";
 import {
   buildSearchSuggestions,
   coalesceSearchResults,
@@ -30,12 +30,16 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const homeData = await getHomePageData();
   const journalEntries = homeData.journal;
   const initialQuery = searchParams?.q ?? "";
+  const productList = await fetchProducts({
+    limit: initialQuery ? 48 : 32,
+    search: initialQuery || undefined,
+  });
   const initialState = coalesceSearchResults(
-    products,
+    productList,
     journalEntries,
     initialQuery,
   );
-  const suggestions = buildSearchSuggestions(products);
+  const suggestions = buildSearchSuggestions(productList);
 
   return (
     <div className="min-h-screen bg-white text-gray-900">

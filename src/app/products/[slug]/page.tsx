@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 
-import { getProductBySlug, products } from "@/data/products";
+import {
+  fetchProductBySlug,
+  fetchProducts,
+} from "@/data/products";
 import { ProductDetail } from "@/components/product-detail";
 
 type ProductPageProps = {
@@ -10,17 +13,31 @@ type ProductPageProps = {
 };
 
 export async function generateStaticParams() {
-  return products.map((product) => ({
+  const list = await fetchProducts({ limit: 64 }).catch(() => []);
+  return list.map((product) => ({
     slug: product.slug,
   }));
 }
 
-export default function ProductPage({ params }: ProductPageProps) {
-  const product = getProductBySlug(params.slug);
+export default async function ProductPage({ params }: ProductPageProps) {
+  const product = await fetchProductBySlug(params.slug);
 
   if (!product) {
     notFound();
   }
 
-  return <ProductDetail product={product} />;
+  const relatedCandidates = await fetchProducts({
+    limit: 16,
+    gender: product.gender,
+  });
+
+  const related = relatedCandidates
+    .filter((item) => item.slug !== product.slug)
+    .filter(
+      (item) =>
+        item.brand.id === product.brand.id || item.gender === product.gender,
+    )
+    .slice(0, 4);
+
+  return <ProductDetail product={product} relatedProducts={related} />;
 }

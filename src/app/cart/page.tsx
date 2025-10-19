@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -22,34 +22,39 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { CartIndicator } from "@/components/cart-indicator";
 import { AccountButton } from "@/components/account-button";
-import { cartItemsSelector, useCartStore } from "@/lib/cart-store";
 import {
-  Product,
-  ProductVariant,
+  buildCartItemDetails,
+  cartItemsSelector,
+  useCartStore,
+  type CartItemDetails,
+} from "@/lib/cart-store";
+import {
   getDefaultVariant,
   getPrimaryMedia,
   getProductBySlug,
   getProductVariant,
   products,
+  type Product,
 } from "@/data/products";
 import { formatPaise } from "@/lib/money";
 
 type DetailedCartItem = {
   key: string;
-  product: Product;
-  variant: ProductVariant;
   qty: number;
+  details: CartItemDetails;
 };
 
-function getVariantUnitPrice(variant: ProductVariant): number {
-  return variant.salePaise ?? variant.mrpPaise;
+function getVariantUnitPrice(details: CartItemDetails): number {
+  return details.variant.salePaise ?? details.variant.mrpPaise;
 }
 
-function getVariantAvailableUnits(variant: ProductVariant): number {
-  if (!variant.inventory) {
+function getVariantAvailableUnits(details: CartItemDetails): number {
+  const stock = details.variant.stock;
+  const reserved = details.variant.reserved ?? 0;
+  if (stock == null) {
     return Number.POSITIVE_INFINITY;
   }
-  return Math.max(0, variant.inventory.stock - variant.inventory.reserved);
+  return Math.max(0, stock - reserved);
 }
 
 const FALLBACK_IMAGE_URL =
@@ -59,31 +64,58 @@ export default function ShoppingCartPage() {
   const items = useCartStore(cartItemsSelector);
   const removeItem = useCartStore((state) => state.removeItem);
   const setItemQuantity = useCartStore((state) => state.setItemQuantity);
-  const addItem = useCartStore((state) => state.addItem);
+  const addItem = useCartStore((state) => state.addDetailedItem);
   const router = useRouter();
 
   const detailedItems = useMemo(() => {
     return items
       .map<DetailedCartItem | null>((cartItem) => {
-        const product = getProductBySlug(cartItem.productSlug);
-        if (!product) {
-          return null;
+        let details = cartItem.details ?? null;
+        if (!details) {
+          const product = getProductBySlug(cartItem.productSlug);
+          if (!product) {
+            return null;
+          }
+          const variant =
+            getProductVariant(product.slug, cartItem.variantId) ??
+            product.variants.find((entry) => entry.id === cartItem.variantId);
+          if (!variant) {
+            return null;
+          }
+          details = buildCartItemDetails(product, variant);
         }
-        const variant =
-          getProductVariant(product.slug, cartItem.variantId) ??
-          product.variants[0];
-        if (!variant) {
-          return null;
-        }
+
+        const available = getVariantAvailableUnits(details);
+        const normalizedQty =
+          available === Number.POSITIVE_INFINITY
+            ? Math.max(1, Math.round(cartItem.qty))
+            : Math.max(1, Math.min(available, Math.round(cartItem.qty)));
+
         return {
-          key: `${product.slug}-${variant.id}`,
-          product,
-          variant,
-          qty: cartItem.qty,
+          key: `${details.product.slug}-${details.variant.id}`,
+          qty: normalizedQty,
+          details,
         };
       })
       .filter((item): item is DetailedCartItem => item !== null);
   }, [items]);
+
+  useEffect(() => {
+    for (const line of detailedItems) {
+      const matching = items.find(
+        (entry) =>
+          entry.productSlug === line.details.product.slug &&
+          entry.variantId === line.details.variant.id
+      );
+      if (!matching) {
+        continue;
+      }
+      const normalizedOriginal = Math.max(1, Math.round(matching.qty));
+      if (normalizedOriginal !== line.qty) {
+        setItemQuantity(line.details.product.slug, line.details.variant.id, line.qty);
+      }
+    }
+  }, [detailedItems, items, setItemQuantity]);
 
   const isEmpty = detailedItems.length === 0;
 
@@ -102,7 +134,7 @@ export default function ShoppingCartPage() {
   const rawSubtotal = useMemo(
     () =>
       detailedItems.reduce(
-        (sum, item) => sum + getVariantUnitPrice(item.variant) * item.qty,
+        (sum, item) => sum + getVariantUnitPrice(item.details) * item.qty,
         0
       ),
     [detailedItems]
@@ -170,18 +202,23 @@ export default function ShoppingCartPage() {
     setShippingEtaDays(near ? 3 : 5);
   }, [taxableSubtotal, zip, FREE_SHIPPING_THRESHOLD]);
 
-  function updateQty(product: Product, variant: ProductVariant, next: number) {
-    const available = getVariantAvailableUnits(variant);
+  function updateQty(
+    slug: string,
+    variantId: string,
+    details: CartItemDetails,
+    next: number
+  ) {
+    const available = getVariantAvailableUnits(details);
     const max = Number.isFinite(available)
       ? Math.max(0, available)
       : Number.POSITIVE_INFINITY;
     const clamped =
-      max <= 0 ? 0 : Math.max(1, Math.min(next, max));
-    setItemQuantity(product.slug, variant.id, clamped);
+      max <= 0 ? 0 : Math.max(1, Math.min(Math.round(next), max));
+    setItemQuantity(slug, variantId, clamped);
   }
 
-  function handleRemove(product: Product, variant: ProductVariant) {
-    removeItem(product.slug, variant.id);
+  function handleRemove(details: CartItemDetails) {
+    removeItem(details.product.slug, details.variant.id);
   }
 
   function handleRecommendedAdd(product: Product) {
@@ -189,7 +226,7 @@ export default function ShoppingCartPage() {
     if (!variant) {
       return;
     }
-    addItem(product.slug, variant.id, 1);
+    addItem(product, variant, 1);
   }
 
   return (
@@ -242,13 +279,12 @@ export default function ShoppingCartPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {detailedItems.map(({ key, product, variant, qty }) => {
-                    const stockLimit = getVariantAvailableUnits(variant);
+                  {detailedItems.map(({ key, details, qty }) => {
+                    const stockLimit = getVariantAvailableUnits(details);
                     const limitReached =
                       Number.isFinite(stockLimit) && stockLimit > 0 && qty >= stockLimit;
-                    const productMedia = getPrimaryMedia(product);
-                    const variantLabel = `${variant.sizeMl} ml`;
-                    const lineUnitPrice = getVariantUnitPrice(variant);
+                    const variantLabel = `${details.variant.sizeMl} ml`;
+                    const lineUnitPrice = getVariantUnitPrice(details);
                     const lineTotal = lineUnitPrice * qty;
                     const lineTotalLabel = formatPaise(lineTotal, {
                       minimumFractionDigits: 0,
@@ -258,8 +294,8 @@ export default function ShoppingCartPage() {
                       <div key={key} className="flex items-center gap-4">
                         <div className="h-20 w-20 overflow-hidden rounded-lg bg-gray-100">
                           <Image
-                            src={productMedia?.url ?? FALLBACK_IMAGE_URL}
-                            alt={productMedia?.alt ?? product.title}
+                            src={details.product.imageUrl ?? FALLBACK_IMAGE_URL}
+                            alt={details.product.imageAlt ?? details.product.title}
                             width={80}
                             height={80}
                             className="h-full w-full object-cover"
@@ -267,16 +303,21 @@ export default function ShoppingCartPage() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium">
-                            {product.title}
+                            {details.product.title}
                           </div>
                           <div className="text-sm text-gray-500">
                             {variantLabel}
                           </div>
                           <div className="mt-2 inline-flex items-center gap-3 rounded-full border px-3 py-1.5">
                             <button
-                              aria-label={`Decrease ${product.title}`}
+                              aria-label={`Decrease ${details.product.title}`}
                               onClick={() =>
-                                updateQty(product, variant, qty - 1)
+                                updateQty(
+                                  details.product.slug,
+                                  details.variant.id,
+                                  details,
+                                  qty - 1
+                                )
                               }
                               disabled={qty <= 1}
                               className="disabled:opacity-40"
@@ -289,17 +330,23 @@ export default function ShoppingCartPage() {
                               value={qty}
                               onChange={(event) =>
                                 updateQty(
-                                  product,
-                                  variant,
+                                  details.product.slug,
+                                  details.variant.id,
+                                  details,
                                   Number.parseInt(event.target.value, 10) || 1
                                 )
                               }
                               className="h-7 w-12 border-0 bg-transparent p-0 text-center focus-visible:ring-0"
                             />
                             <button
-                              aria-label={`Increase ${product.title}`}
+                              aria-label={`Increase ${details.product.title}`}
                               onClick={() =>
-                                updateQty(product, variant, qty + 1)
+                                updateQty(
+                                  details.product.slug,
+                                  details.variant.id,
+                                  details,
+                                  qty + 1
+                                )
                               }
                               disabled={limitReached}
                               className="disabled:opacity-40"
@@ -321,7 +368,7 @@ export default function ShoppingCartPage() {
                             variant="ghost"
                             size="sm"
                             className="mt-1 gap-1 text-gray-500 hover:text-rose-600"
-                            onClick={() => handleRemove(product, variant)}
+                            onClick={() => handleRemove(details)}
                           >
                             <Trash2 className="h-4 w-4" />
                             Remove

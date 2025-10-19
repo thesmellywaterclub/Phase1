@@ -1,3 +1,5 @@
+import { apiFetch, ApiError, type ApiResponseEnvelope } from "@/lib/api-client"
+
 export type ProductGender = "unisex" | "men" | "women" | "other"
 
 export type ProductBrand = {
@@ -57,6 +59,15 @@ export type Product = {
   variants: ProductVariant[]
   aggregates: ProductAggregates
 }
+
+type ProductListResponse = {
+  data: Product[]
+  meta: {
+    nextCursor: string | null
+  }
+}
+
+type ProductResponse = ApiResponseEnvelope<Product>
 
 const brands = {
   dior: {
@@ -633,6 +644,109 @@ export const products: Product[] = productSeeds.map((seed) => {
     },
   }
 })
+
+function cloneProduct(product: Product): Product {
+  return {
+    ...product,
+    brand: { ...product.brand },
+    notes: {
+      top: [...product.notes.top],
+      heart: [...product.notes.heart],
+      base: [...product.notes.base],
+    },
+    media: product.media.map((media) => ({ ...media })),
+    variants: product.variants.map((variant) => ({
+      ...variant,
+      inventory: variant.inventory
+        ? { ...variant.inventory }
+        : null,
+    })),
+    aggregates: { ...product.aggregates },
+  }
+}
+
+function cloneProductsCollection(collection: Product[]): Product[] {
+  return collection.map(cloneProduct)
+}
+
+function cloneFallbackProduct(slug: string): Product | undefined {
+  const match = products.find((product) => product.slug === slug)
+  return match ? cloneProduct(match) : undefined
+}
+
+type FetchProductsOptions = {
+  limit?: number
+  cursor?: string
+  search?: string
+  gender?: ProductGender
+  brandId?: string
+  includeInactive?: boolean
+}
+
+function buildProductsPath(options: FetchProductsOptions): string {
+  const params = new URLSearchParams()
+  const limit = options.limit ?? 24
+  params.set("limit", String(limit))
+
+  if (options.cursor) {
+    params.set("cursor", options.cursor)
+  }
+  if (options.search) {
+    params.set("search", options.search)
+  }
+  if (options.gender) {
+    params.set("gender", options.gender)
+  }
+  if (options.brandId) {
+    params.set("brandId", options.brandId)
+  }
+  if (!options.includeInactive) {
+    params.set("isActive", "true")
+  }
+
+  const query = params.toString()
+  return query ? `/api/products?${query}` : "/api/products"
+}
+
+export async function fetchProducts(
+  options: FetchProductsOptions = {},
+): Promise<Product[]> {
+  try {
+    const path = buildProductsPath(options)
+    const response = await apiFetch<ProductListResponse>(path)
+    return response.data
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[products] Falling back to static dataset", error)
+    }
+    return cloneProductsCollection(products)
+  }
+}
+
+export async function fetchProductBySlug(
+  slug: string,
+): Promise<Product | undefined> {
+  if (!slug) {
+    return undefined
+  }
+
+  try {
+    const response = await apiFetch<ProductResponse>(
+      `/api/products/slug/${slug}`,
+    )
+    return response.data
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return undefined
+    }
+
+    if (process.env.NODE_ENV !== "production") {
+      console.error(`[products] Failed to fetch product ${slug}`, error)
+    }
+
+    return cloneFallbackProduct(slug)
+  }
+}
 
 export function getProductBySlug(slug: string): Product | undefined {
   return products.find((product) => product.slug === slug)

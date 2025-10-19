@@ -31,9 +31,11 @@ import {
   type CustomerProfileData,
 } from "@/data/customer";
 import { useAuthStore } from "@/lib/auth-store";
+import { ApiError } from "@/lib/api-client";
 
 export default function CustomerProfilePage() {
   const user = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
   const logout = useAuthStore((state) => state.logout);
   const router = useRouter();
   const [customer, setCustomer] = useState<CustomerProfileData | null>(null);
@@ -41,38 +43,63 @@ export default function CustomerProfilePage() {
 
   useEffect(() => {
     let ignore = false;
-    if (!user) {
-      router.replace("/login?next=/account");
+
+    if (!user || !token) {
+      if (!user) {
+        router.replace("/login?next=/account");
+      }
       return () => {
         ignore = true;
       };
     }
+
     setLoading(true);
-    fetchCustomerProfile()
+
+    fetchCustomerProfile(token)
       .then((data) => {
-        if (!ignore) {
-          const merged: CustomerProfileData = {
-            ...data,
-            profile: {
-              ...data.profile,
-              name: user.name,
-              email: user.email,
-            },
-          };
-          setCustomer(merged);
-          setLoading(false);
+        if (ignore) {
+          return;
         }
+
+        const shouldOverrideProfile =
+          data.profile.email !== user.email || data.profile.name !== user.name;
+
+        const merged: CustomerProfileData = shouldOverrideProfile
+          ? {
+              ...data,
+              profile: {
+                ...data.profile,
+                name: user.name,
+                email: user.email,
+              },
+            }
+          : data;
+
+        setCustomer(merged);
+        setLoading(false);
       })
-      .catch(() => {
-        if (!ignore) {
-          setCustomer(null);
-          setLoading(false);
+      .catch((error) => {
+        if (ignore) {
+          return;
         }
+
+        if (error instanceof ApiError && error.status === 401) {
+          logout();
+          router.replace("/login?next=/account");
+          return;
+        }
+
+        if (process.env.NODE_ENV !== "production") {
+          console.error("[account] Failed to load customer profile", error);
+        }
+        setCustomer(null);
+        setLoading(false);
       });
+
     return () => {
       ignore = true;
     };
-  }, [user, router]);
+  }, [user, token, router, logout]);
 
   const updatePreferences = (partial: Partial<CustomerProfileData["preferences"]>) => {
     setCustomer((prev) =>
@@ -237,55 +264,62 @@ export default function CustomerProfilePage() {
                   </Button>
                 </div>
 
-                <div className="grid gap-6 md:grid-cols-2">
-                  {addresses.map((addr) => (
-                    <Card
-                      key={addr.id}
-                      className={`rounded-xl border ${
-                        addr.default ? "border-pink-600" : "border-gray-200"
-                      }`}
-                    >
-                      <CardContent className="space-y-2 p-4">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <h3 className="font-semibold text-gray-800">
-                              {addr.name}
-                            </h3>
-                            <p className="text-sm text-gray-600">
-                              {addr.line1}, {addr.city}, {addr.zip}
-                            </p>
-                            <p className="text-xs text-gray-500">{addr.country}</p>
+                {addresses.length > 0 ? (
+                  <div className="grid gap-6 md:grid-cols-2">
+                    {addresses.map((addr) => (
+                      <Card
+                        key={addr.id}
+                        className={`rounded-xl border ${
+                          addr.default ? "border-pink-600" : "border-gray-200"
+                        }`}
+                      >
+                        <CardContent className="space-y-2 p-4">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h3 className="font-semibold text-gray-800">
+                                {addr.name}
+                              </h3>
+                              <p className="text-sm text-gray-600">
+                                {addr.line1}, {addr.city}
+                                {addr.zip ? `, ${addr.zip}` : ""}
+                              </p>
+                              <p className="text-xs text-gray-500">{addr.country || "—"}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button size="icon" variant="ghost" aria-label="Edit address">
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                aria-label="Delete address"
+                              >
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex gap-2">
-                            <Button size="icon" variant="ghost" aria-label="Edit address">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
+                          {addr.default ? (
+                            <span className="text-xs font-medium text-pink-600">
+                              Default {addr.type} Address
+                            </span>
+                          ) : (
                             <Button
-                              size="icon"
-                              variant="ghost"
-                              aria-label="Delete address"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-3 text-xs"
                             >
-                              <Trash2 className="h-4 w-4 text-red-500" />
+                              Set as Default
                             </Button>
-                          </div>
-                        </div>
-                        {addr.default ? (
-                          <span className="text-xs font-medium text-pink-600">
-                            Default {addr.type} Address
-                          </span>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 px-3 text-xs"
-                          >
-                            Set as Default
-                          </Button>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/60 p-8 text-center text-sm text-gray-500">
+                    No addresses saved yet. Complete a checkout to store your preferred shipping details.
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -294,65 +328,101 @@ export default function CustomerProfilePage() {
             <Card className="rounded-2xl shadow-sm">
               <CardContent className="space-y-6 p-6">
                 <h2 className="mb-4 text-xl font-semibold">My Orders</h2>
-                {orders.map((order) => (
-                  <div key={order.id} className="mb-6 border-b pb-6 last:border-0">
-                    <div className="mb-2 flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">Order ID: {order.id}</p>
-                        <p className="text-sm text-gray-500">
-                          Placed on {order.date}
-                        </p>
+                {orders.length > 0 ? (
+                  orders.map((order) => {
+                    const statusLower = order.status.toLowerCase();
+                    const statusColor =
+                      statusLower === "delivered"
+                        ? "text-emerald-600"
+                        : statusLower === "cancelled" || statusLower.includes("refund")
+                        ? "text-rose-600"
+                        : "text-amber-600";
+                    const tracking = order.tracking;
+                    const hasTrackingDetails = Boolean(
+                      tracking.id ||
+                        tracking.carrier ||
+                        tracking.currentLocation ||
+                        tracking.expectedDelivery ||
+                        tracking.status,
+                    );
+
+                    return (
+                      <div key={order.id} className="mb-6 border-b pb-6 last:border-0">
+                        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="font-medium">Order ID: {order.id}</p>
+                            <p className="text-sm text-gray-500">
+                              Placed on {order.date}
+                            </p>
+                          </div>
+                          <span className={`text-sm font-semibold ${statusColor}`}>
+                            {order.status}
+                          </span>
+                        </div>
+
+                        <div className="mb-3 text-sm text-gray-700">
+                          <p>
+                            Total:{" "}
+                            <span className="font-semibold">{order.total}</span>
+                          </p>
+                        </div>
+
+                        <div className="mb-3">
+                          <h4 className="mb-2 flex items-center gap-2 font-medium">
+                            <Package className="h-4 w-4" />
+                            Items
+                          </h4>
+                          <ul className="list-inside list-disc text-sm text-gray-600">
+                            {order.items.map((item, idx) => (
+                              <li key={`${order.id}-item-${idx}`}>
+                                {item.name} x{item.qty}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <div>
+                          <h4 className="mb-2 flex items-center gap-2 font-medium">
+                            <Truck className="h-4 w-4" />
+                            Tracking
+                          </h4>
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <p>
+                              Status:{" "}
+                              <span className="font-medium">
+                                {tracking.status ?? order.status}
+                              </span>
+                            </p>
+                            {tracking.id ? <p>Tracking ID: {tracking.id}</p> : null}
+                            {tracking.carrier ? (
+                              <p>Carrier: {tracking.carrier}</p>
+                            ) : null}
+                            {tracking.currentLocation ? (
+                              <p>Last update: {tracking.currentLocation}</p>
+                            ) : null}
+                            {tracking.expectedDelivery ? (
+                              <p>
+                                Expected Delivery: {tracking.expectedDelivery}
+                              </p>
+                            ) : null}
+                            {!hasTrackingDetails ? (
+                              <p className="text-gray-500">
+                                Tracking details will appear once the shipment is created.
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
                       </div>
-                      <span
-                        className={`text-sm font-semibold ${
-                          order.status === "Delivered"
-                            ? "text-emerald-600"
-                            : "text-amber-600"
-                        }`}
-                      >
-                        {order.status}
-                      </span>
-                    </div>
-
-                    <div className="mb-3 text-sm text-gray-700">
-                      <p>
-                        Total: <span className="font-semibold">{order.total}</span>
-                      </p>
-                    </div>
-
-                    <div className="mb-3">
-                      <h4 className="mb-2 flex items-center gap-2 font-medium">
-                        <Package className="h-4 w-4" />
-                        Items
-                      </h4>
-                      <ul className="list-inside list-disc text-sm text-gray-600">
-                        {order.items.map((item, idx) => (
-                          <li key={idx}>
-                            {item.name} x{item.qty}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div>
-                      <h4 className="mb-2 flex items-center gap-2 font-medium">
-                        <Truck className="h-4 w-4" />
-                        Tracking
-                      </h4>
-                      <div className="space-y-1 text-sm text-gray-600">
-                        <p>Tracking ID: {order.tracking.id}</p>
-                        <p>Carrier: {order.tracking.carrier}</p>
-                        <p>Current Location: {order.tracking.currentLocation}</p>
-                        <p>
-                          Expected Delivery: {order.tracking.expectedDelivery}
-                        </p>
-                      </div>
-                    </div>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/60 p-8 text-center text-sm text-gray-500">
+                    You haven&apos;t placed any orders yet. Visit the collection to get started.
                   </div>
-                ))}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                )}
+             </CardContent>
+           </Card>
+         </TabsContent>
 
           <TabsContent value="payments">
             <Card className="rounded-2xl shadow-sm">
@@ -372,54 +442,53 @@ export default function CustomerProfilePage() {
                   </Button>
                 </div>
 
-                <div className="grid gap-6 md:grid-cols-2">
-                  {paymentMethods.map((method) => (
-                    <Card
-                      key={method.id}
-                      className={`rounded-xl border ${
-                        method.default ? "border-pink-600" : "border-gray-200"
-                      }`}
-                    >
-                      <CardContent className="space-y-2 p-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-semibold text-gray-800">
-                              {method.type} •••• {method.last4}
-                            </p>
-                            <p className="text-sm text-gray-600">
-                              Expires {method.expiry}
-                            </p>
+                {paymentMethods.length > 0 ? (
+                  <div className="grid gap-6 md:grid-cols-2">
+                    {paymentMethods.map((method) => (
+                      <Card
+                        key={method.id}
+                        className={`rounded-xl border ${
+                          method.default ? "border-pink-600" : "border-gray-200"
+                        }`}
+                      >
+                        <CardContent className="space-y-2 p-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-semibold text-gray-800">
+                                {method.type} •••• {method.last4}
+                              </p>
+                              <p className="text-sm text-gray-600">
+                                Expires {method.expiry}
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button size="icon" variant="ghost" aria-label="Edit card">
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                aria-label="Delete card"
+                              >
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex gap-2">
-                            <Button size="icon" variant="ghost" aria-label="Edit card">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              aria-label="Delete card"
-                            >
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </Button>
+                          <div className="flex items-center justify-between text-xs text-gray-500">
+                            <span>
+                              {method.default ? "Default payment method" : "Backup payment method"}
+                            </span>
+                            <Switch checked={method.default} aria-readonly />
                           </div>
-                        </div>
-                        {method.default ? (
-                          <span className="text-xs font-medium text-pink-600">
-                            Default Payment Method
-                          </span>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 px-3 text-xs"
-                          >
-                            Set as Default
-                          </Button>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/60 p-8 text-center text-sm text-gray-500">
+                    No saved payment methods. Add a card during checkout to store it for future orders.
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

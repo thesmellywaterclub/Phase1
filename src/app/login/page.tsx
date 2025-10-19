@@ -8,7 +8,28 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAuthStore } from "@/lib/auth-store";
+import { useAuthStore, type AuthUser } from "@/lib/auth-store";
+import { apiFetch, ApiError, type ApiResponseEnvelope } from "@/lib/api-client";
+
+function extractApiErrorMessage(payload: unknown): string | null {
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "error" in payload
+  ) {
+    const errorPayload = (payload as { error?: unknown }).error;
+    if (
+      typeof errorPayload === "object" &&
+      errorPayload !== null &&
+      "message" in errorPayload &&
+      typeof (errorPayload as { message?: unknown }).message === "string"
+    ) {
+      const message = (errorPayload as { message: string }).message.trim();
+      return message || null;
+    }
+  }
+  return null;
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -38,16 +59,53 @@ export default function LoginPage() {
     }
 
     setIsSubmitting(true);
-    // Mock auth delay
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    login({
-      name: email.split("@")[0] || "Member",
-      email,
-    });
-    setIsSubmitting(false);
 
-    const next = nextParam || "/account";
-    router.replace(next);
+    try {
+      const response = await apiFetch<
+        ApiResponseEnvelope<{
+          token: string;
+          user: {
+            id: string;
+            email: string;
+            fullName: string;
+            avatarUrl: string | null;
+            phone: string | null;
+            isSeller: boolean;
+            clubMember: boolean;
+            clubVerified: boolean;
+          };
+        }>
+      >("/api/auth/login", {
+        method: "POST",
+        json: { email, password },
+      });
+
+      const { token, user } = response.data;
+      const authUser: AuthUser = {
+        id: user.id,
+        name: user.fullName,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+        phone: user.phone,
+        isSeller: user.isSeller,
+        clubMember: user.clubMember,
+        clubVerified: user.clubVerified,
+      };
+
+      login({ token, user: authUser });
+
+      const next = nextParam || "/account";
+      router.replace(next);
+    } catch (apiError) {
+      if (apiError instanceof ApiError) {
+        const message = extractApiErrorMessage(apiError.body);
+        setError(message || "Invalid email or password.");
+      } else {
+        setError("Unable to sign in. Please try again.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -119,6 +177,16 @@ export default function LoginPage() {
             >
               Back to customer profile
             </Link>
+          </div>
+          <div className="text-center text-sm text-gray-500">
+            New to the club?{" "}
+            <Link
+              href="/signup"
+              className="text-pink-600 hover:text-pink-700"
+            >
+              Create an account
+            </Link>
+            .
           </div>
         </CardContent>
       </Card>

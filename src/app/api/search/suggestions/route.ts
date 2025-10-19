@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { products } from "@/data/products";
+import { fetchProducts } from "@/data/products";
 import { buildSearchSuggestions } from "@/lib/search";
 
 export async function GET() {
-  const suggestions = buildSearchSuggestions(products, 16);
+  const productList = await fetchProducts({ limit: 64 });
+  const suggestions = buildSearchSuggestions(productList, 16);
   return NextResponse.json({ suggestions });
 }

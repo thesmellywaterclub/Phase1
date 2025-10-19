@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,9 +31,10 @@ import {
 } from "lucide-react";
 
 import type { Product, ProductVariant } from "@/data/products";
-import { getPrimaryMedia, products } from "@/data/products";
+import { getPrimaryMedia } from "@/data/products";
 import { CartIndicator } from "@/components/cart-indicator";
-import { useCartStore } from "@/lib/cart-store";
+import { buildCartItemDetails, useCartStore } from "@/lib/cart-store";
+import { useBuyNowStore } from "@/lib/buy-now-store";
 import { AccountButton } from "@/components/account-button";
 import { SiteSearchBar } from "@/components/site-search-bar";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,7 @@ import { formatPaise } from "@/lib/money";
 
 type ProductDetailProps = {
   product: Product;
+  relatedProducts?: Product[];
 };
 
 function getAvailableUnits(variant: ProductVariant): number {
@@ -81,7 +83,7 @@ type LayeringSuggestion = {
   relatedProduct?: Product;
 };
 
-export function ProductDetail({ product }: ProductDetailProps) {
+export function ProductDetail({ product, relatedProducts = [] }: ProductDetailProps) {
   const [variant, setVariant] = useState(product.variants[0]);
   const [qty, setQty] = useState(1);
   const availableUnits = getAvailableUnits(variant);
@@ -111,6 +113,14 @@ export function ProductDetail({ product }: ProductDetailProps) {
             isPrimary: true,
           },
         ];
+
+  const curatedRelated = useMemo(
+    () =>
+      relatedProducts
+        .filter((item) => item.slug !== product.slug)
+        .slice(0, 4),
+    [relatedProducts, product.slug]
+  );
 
   const [active, setActive] = useState(0);
   const mediaCount = galleryMedia.length;
@@ -144,7 +154,9 @@ export function ProductDetail({ product }: ProductDetailProps) {
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState({ show: false, x: 50, y: 50 });
-  const addItem = useCartStore((state) => state.addItem);
+  const addItem = useCartStore((state) => state.addDetailedItem);
+  const setBuyNowItem = useBuyNowStore((state) => state.setItem);
+  const clearBuyNowItem = useBuyNowStore((state) => state.clear);
   const router = useRouter();
   const searchParams = useSearchParams();
   const variantParam = searchParams.get("variant");
@@ -177,13 +189,6 @@ export function ProductDetail({ product }: ProductDetailProps) {
       accent: "from-amber-100/70 via-amber-50/60 to-white",
     },
   ];
-  const relatedProducts = products
-    .filter(
-      (item) =>
-        item.slug !== product.slug &&
-        (item.brand.id === product.brand.id || item.gender === product.gender)
-    )
-    .slice(0, 4);
 
   const layeringSuggestions: LayeringSuggestion[] = [
     {
@@ -192,11 +197,11 @@ export function ProductDetail({ product }: ProductDetailProps) {
         .slice(0, 2)
         .join(" & ")} diffuse with brightness.`,
     },
-    relatedProducts[0]
+    curatedRelated[0]
       ? {
-          title: `Veil with ${relatedProducts[0].title}`,
-          description: `Mist a light cloud of ${relatedProducts[0].title} to echo the ${product.notes.heart[0]?.toLowerCase() ?? "heart"} accord.`,
-          relatedProduct: relatedProducts[0],
+          title: `Veil with ${curatedRelated[0].title}`,
+          description: `Mist a light cloud of ${curatedRelated[0].title} to echo the ${product.notes.heart[0]?.toLowerCase() ?? "heart"} accord.`,
+          relatedProduct: curatedRelated[0],
         }
       : null,
     {
@@ -260,13 +265,18 @@ export function ProductDetail({ product }: ProductDetailProps) {
 
   const handleAddToCart = () => {
     if (!inStock) return;
-    addItem(product.slug, variant.id, qty);
+    clearBuyNowItem();
+    addItem(product, variant, qty);
   };
 
   const handleBuyNow = () => {
     if (!inStock) return;
-    addItem(product.slug, variant.id, qty);
-    router.push("/checkout");
+    clearBuyNowItem();
+    setBuyNowItem({
+      details: buildCartItemDetails(product, variant),
+      qty,
+    });
+    router.push("/checkout?mode=buy-now");
   };
 
   return (
@@ -750,7 +760,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
                           </li>
                         ))}
                       </ul>
-                      {relatedProducts.length > 0 ? (
+                      {curatedRelated.length > 0 ? (
                         <div className="mt-6 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-5">
                           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                             <div>
@@ -766,7 +776,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
                             </span>
                           </div>
                           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                            {relatedProducts.slice(0, 3).map((item) => {
+                            {curatedRelated.slice(0, 3).map((item) => {
                               const itemMedia = getPrimaryMedia(item);
                               const itemPrice = formatPaise(
                                 item.aggregates.lowPricePaise,
@@ -898,7 +908,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
         <div className="mx-auto max-w-7xl px-4">
           <h2 className="text-2xl font-semibold">Pairs well with</h2>
         <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
-          {relatedProducts.map((item) => {
+          {curatedRelated.map((item) => {
             const itemMedia = getPrimaryMedia(item);
             const itemPrice = formatPaise(item.aggregates.lowPricePaise, {
               minimumFractionDigits: 0,

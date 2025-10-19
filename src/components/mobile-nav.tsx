@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Menu, Search, ShoppingBag, Sparkles, User2, X } from "lucide-react";
+import { Menu, Search, Sparkles, User2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -58,10 +58,8 @@ export function MobileNav({ className }: MobileNavProps) {
     router.push("/");
   };
 
-  const menuItems = [
-    { label: "Collection", href: "/products" },
+  const menuItems: Array<{ label: string; href: string; icon?: typeof Search }> = [
     { label: "Search", href: "/search", icon: Search },
-    { label: "My Cart", href: "/cart", icon: ShoppingBag },
   ];
 
   const accountItems = authUser
@@ -128,7 +126,7 @@ export function MobileNav({ className }: MobileNavProps) {
               </div>
 
               <nav className="space-y-2">
-                {menuItems.map((item) => {
+                {menuItems.length === 0 ? null : menuItems.map((item) => {
                   const Icon = item.icon;
                   return (
                     <button

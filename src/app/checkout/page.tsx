@@ -1,15 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   CreditCard,
   Truck,
   ShieldCheck,
   Lock,
-  Apple,
-  Wallet,
+  QrCode,
+  Package,
   ArrowLeft,
   ArrowRight,
   Calendar,
@@ -22,67 +22,294 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CartIndicator } from "@/components/cart-indicator";
 import { AccountButton } from "@/components/account-button";
 import {
+  buildCartItemDetails,
   cartItemsSelector,
   useCartStore,
 } from "@/lib/cart-store";
+import type { CartItemDetails } from "@/lib/cart-store";
+import { useBuyNowStore } from "@/lib/buy-now-store";
 import {
-  type ProductVariant,
-  getPrimaryMedia,
-  getProductBySlug,
-  getProductVariant,
-} from "@/data/products";
+  submitBuyNowCheckout,
+  submitCartCheckout,
+  type CheckoutAddressInput,
+} from "@/data/checkout";
+import { useAuthStore } from "@/lib/auth-store";
+import { ApiError } from "@/lib/api-client";
+import { syncRemoteCart } from "@/lib/cart-remote";
+import { getProductBySlug, getProductVariant } from "@/data/products";
 import { formatPaise } from "@/lib/money";
 
 type DetailedItem = {
   key: string;
-  name: string;
-  variantLabel: string;
-  pricePaise: number;
   qty: number;
-  image: string;
+  details: CartItemDetails;
+  unitPricePaise: number;
 };
 
-function getVariantUnitPricePaise(variant: ProductVariant): number {
-  return variant.salePaise ?? variant.mrpPaise;
+function getUnitPricePaise(details: CartItemDetails): number {
+  return details.variant.salePaise ?? details.variant.mrpPaise;
+}
+
+function getAvailableUnits(details: CartItemDetails): number {
+  const stock = details.variant.stock;
+  const reserved = details.variant.reserved ?? 0;
+  if (stock == null) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(0, stock - reserved);
+}
+
+function splitName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return { firstName: "Guest", lastName: "Customer" };
+  }
+  const [firstName, ...rest] = parts;
+  return {
+    firstName,
+    lastName: rest.length > 0 ? rest.join(" ") : firstName,
+  };
+}
+
+function createCheckoutAddressFromShipping(
+  shipping: {
+    name: string;
+    phone: string;
+    line1: string;
+    line2: string;
+    city: string;
+    state: string;
+    zip: string;
+    country: string;
+  }
+): CheckoutAddressInput {
+  const { firstName, lastName } = splitName(shipping.name);
+  const line1 = shipping.line1.trim();
+  const line2 = shipping.line2.trim();
+  return {
+    firstName,
+    lastName,
+    line1,
+    line2: line2 ? line2 : undefined,
+    city: shipping.city.trim(),
+    state: shipping.state.trim(),
+    postalCode: shipping.zip.trim(),
+    country: shipping.country.trim(),
+    phone: shipping.phone.trim() || undefined,
+  };
 }
 
 const FALLBACK_IMAGE_URL =
   "https://via.placeholder.com/400x400.png?text=Fragrance";
 
+const INDIAN_STATE_NAMES = [
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chhattisgarh",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+  "Andaman and Nicobar Islands",
+  "Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu",
+  "Delhi",
+  "Jammu and Kashmir",
+  "Ladakh",
+  "Lakshadweep",
+  "Puducherry",
+];
+
+const INDIAN_STATE_CODE_MAP: Record<string, string> = {
+  AP: "Andhra Pradesh",
+  AR: "Arunachal Pradesh",
+  AS: "Assam",
+  BR: "Bihar",
+  CG: "Chhattisgarh",
+  CT: "Chhattisgarh",
+  GA: "Goa",
+  GJ: "Gujarat",
+  HR: "Haryana",
+  HP: "Himachal Pradesh",
+  JH: "Jharkhand",
+  KA: "Karnataka",
+  KL: "Kerala",
+  MP: "Madhya Pradesh",
+  MH: "Maharashtra",
+  MN: "Manipur",
+  ML: "Meghalaya",
+  MZ: "Mizoram",
+  NL: "Nagaland",
+  OD: "Odisha",
+  OR: "Odisha",
+  PB: "Punjab",
+  RJ: "Rajasthan",
+  SK: "Sikkim",
+  TN: "Tamil Nadu",
+  TG: "Telangana",
+  TS: "Telangana",
+  TR: "Tripura",
+  UP: "Uttar Pradesh",
+  UK: "Uttarakhand",
+  UA: "Uttarakhand",
+  WB: "West Bengal",
+  AN: "Andaman and Nicobar Islands",
+  CH: "Chandigarh",
+  DN: "Dadra and Nagar Haveli and Daman and Diu",
+  DD: "Dadra and Nagar Haveli and Daman and Diu",
+  DL: "Delhi",
+  JK: "Jammu and Kashmir",
+  LA: "Ladakh",
+  LD: "Lakshadweep",
+  PY: "Puducherry",
+};
+
+const INDIA_COUNTRY_LABELS = new Set([
+  "india",
+  "bharat",
+  "republic of india",
+  "in",
+]);
+
+function normalizeStateInput(value: string): string {
+  return value.toLowerCase().replace(/[^a-z]/g, "");
+}
+
+const INDIAN_STATE_LOOKUP = (() => {
+  const map = new Map<string, string>();
+  INDIAN_STATE_NAMES.forEach((name) => {
+    map.set(normalizeStateInput(name), name);
+  });
+  Object.entries(INDIAN_STATE_CODE_MAP).forEach(([code, name]) => {
+    map.set(normalizeStateInput(code), name);
+  });
+  return map;
+})();
+
+function isValidIndianPin(pin: string): boolean {
+  return /^[1-9][0-9]{5}$/.test(pin.trim());
+}
+
+function normalizePhoneNumber(phone: string): string {
+  return phone.replace(/[^0-9]/g, "");
+}
+
+function isValidIndianPhone(phone: string): boolean {
+  const digits = normalizePhoneNumber(phone);
+  if (!digits) return true;
+  if (digits.length === 10 && /^[6-9]/.test(digits)) {
+    return true;
+  }
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return /^[6-9]/.test(digits.slice(2));
+  }
+  if (digits.length === 11 && digits.startsWith("0")) {
+    return /^[6-9]/.test(digits.slice(1));
+  }
+  return false;
+}
+
+function resolveIndianState(value: string): string | null {
+  if (!value.trim()) {
+    return null;
+  }
+  const normalized = normalizeStateInput(value);
+  if (normalized === "pondicherry") {
+    return "Puducherry";
+  }
+  return INDIAN_STATE_LOOKUP.get(normalized) ?? null;
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const checkoutMode =
+    searchParams.get("mode") === "buy-now" ? "buy-now" : "cart";
   const items = useCartStore(cartItemsSelector);
+  const clearCart = useCartStore((state) => state.clear);
+  const buyNowItem = useBuyNowStore((state) => state.item);
+  const setBuyNowItem = useBuyNowStore((state) => state.setItem);
+  const clearBuyNow = useBuyNowStore((state) => state.clear);
+  const authUser = useAuthStore((state) => state.user);
+  const authToken = useAuthStore((state) => state.token);
 
   const detailedItems = useMemo<DetailedItem[]>(() => {
+    if (checkoutMode === "buy-now") {
+      if (!buyNowItem) {
+        return [];
+      }
+      const qty = Math.max(1, Math.round(buyNowItem.qty));
+      return [
+        {
+          key: `${buyNowItem.details.product.slug}-${buyNowItem.details.variant.id}`,
+          qty,
+          details: buyNowItem.details,
+          unitPricePaise: getUnitPricePaise(buyNowItem.details),
+        },
+      ];
+    }
+
     return items
       .map((item) => {
-        const product = getProductBySlug(item.productSlug);
-        if (!product) return null;
-        const variant =
-          getProductVariant(product.slug, item.variantId) ??
-          product.variants[0];
-        if (!variant) return null;
-        const media = getPrimaryMedia(product);
+        let details = item.details ?? null;
+        if (!details) {
+          const product = getProductBySlug(item.productSlug);
+          if (!product) return null;
+          const variant =
+            getProductVariant(product.slug, item.variantId) ??
+            product.variants.find((entry) => entry.id === item.variantId);
+          if (!variant) return null;
+          details = buildCartItemDetails(product, variant);
+        }
+
+        const available = getAvailableUnits(details);
+        const qty =
+          available === Number.POSITIVE_INFINITY
+            ? Math.max(1, Math.round(item.qty))
+            : Math.max(1, Math.min(available, Math.round(item.qty)));
+
         return {
-          key: `${product.slug}-${variant.id}`,
-          name: product.title,
-          variantLabel: `${variant.sizeMl} ml`,
-          pricePaise: getVariantUnitPricePaise(variant),
-          qty: item.qty,
-          image: media?.url ?? FALLBACK_IMAGE_URL,
+          key: `${details.product.slug}-${details.variant.id}`,
+          qty,
+          details,
+          unitPricePaise: getUnitPricePaise(details),
         };
       })
       .filter((entry): entry is DetailedItem => entry !== null);
-  }, [items]);
+  }, [checkoutMode, buyNowItem, items]);
 
   const subtotalPaise = useMemo(
-    () => detailedItems.reduce((sum, item) => sum + item.pricePaise * item.qty, 0),
+    () =>
+      detailedItems.reduce(
+        (sum, item) => sum + item.unitPricePaise * item.qty,
+        0
+      ),
     [detailedItems]
   );
   const subtotal = subtotalPaise / 100;
@@ -91,18 +318,20 @@ export default function CheckoutPage() {
 
   const [useSavedAddress, setUseSavedAddress] = useState(true);
   const [shipping, setShipping] = useState({
-    name: "Jane Doe",
-    phone: "+1 555-123-4567",
-    line1: "123 Ocean Drive",
+    name: authUser?.name ?? "Jane Doe",
+    email: authUser?.email ?? "",
+    phone: authUser?.phone ?? "+91 98765 43210",
+    line1: "221 MG Road",
     line2: "",
-    city: "Miami",
-    state: "FL",
-    zip: "33139",
-    country: "USA",
+    city: "Bengaluru",
+    state: "Karnataka",
+    zip: "560001",
+    country: "India",
     date: "",
     notes: "",
   });
   const [addressValid, setAddressValid] = useState<boolean | null>(null);
+  const [addressError, setAddressError] = useState<string | null>(null);
 
   type ShipMethod = "standard" | "express" | "overnight";
   const [shipMethod, setShipMethod] = useState<ShipMethod>("standard");
@@ -120,20 +349,35 @@ export default function CheckoutPage() {
       : "1–2 business days";
 
   const [payTab, setPayTab] = useState("card");
-  const [billingSame, setBillingSame] = useState(true);
-  const [card, setCard] = useState({
-    number: "",
-    name: "",
-    exp: "",
-    cvc: "",
-  });
-  const [billing, setBilling] = useState({
-    line1: "",
-    city: "",
-    state: "",
-    zip: "",
-    country: "",
-  });
+  useEffect(() => {
+    if (!authUser) {
+      return;
+    }
+    setShipping((current) => {
+      const hasCustomName = current.name && current.name !== "Jane Doe";
+      return {
+        ...current,
+        name: hasCustomName ? current.name : authUser.name,
+        email: authUser.email,
+        phone: authUser.phone ?? current.phone,
+        country: "India",
+      };
+    });
+  }, [authUser]);
+  useEffect(() => {
+    if (checkoutMode !== "buy-now") {
+      return;
+    }
+    if (!buyNowItem || detailedItems.length === 0) {
+      return;
+    }
+    const target = detailedItems[0];
+    if (target.qty !== buyNowItem.qty) {
+      setBuyNowItem({ details: buyNowItem.details, qty: target.qty });
+    }
+  }, [checkoutMode, buyNowItem, detailedItems, setBuyNowItem]);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   const tax = Math.round((subtotal + shipRate) * 0.18 * 100) / 100;
   const total = Math.round((subtotal + shipRate + tax) * 100) / 100;
@@ -150,12 +394,72 @@ export default function CheckoutPage() {
   }, [shipMethod]);
 
   function validateAddress() {
-    const ok =
-      shipping.line1.trim().length > 3 &&
-      shipping.city.trim().length > 1 &&
-      /\d{6}/.test(shipping.zip);
-    setAddressValid(ok);
-    return ok;
+    const line1 = shipping.line1.trim();
+    if (line1.length < 4) {
+      setAddressError("Enter a detailed street address (at least 4 characters).");
+      setAddressValid(false);
+      return false;
+    }
+
+    const city = shipping.city.trim();
+    if (city.length < 2) {
+      setAddressError("Enter the city or locality.");
+      setAddressValid(false);
+      return false;
+    }
+
+    const pin = shipping.zip.trim();
+    if (!isValidIndianPin(pin)) {
+      setAddressError("Enter a valid six-digit Indian PIN code.");
+      setAddressValid(false);
+      return false;
+    }
+
+    const stateMatch = resolveIndianState(shipping.state);
+    if (!stateMatch) {
+      setAddressError("Select a valid Indian state or union territory.");
+      setAddressValid(false);
+      return false;
+    }
+
+    const normalizedCountry = shipping.country.trim().toLowerCase();
+    if (!INDIA_COUNTRY_LABELS.has(normalizedCountry)) {
+      setAddressError("Deliveries are limited to India. Please set the country to India.");
+      setAddressValid(false);
+      return false;
+    }
+
+    if (!isValidIndianPhone(shipping.phone)) {
+      setAddressError("Enter a valid Indian mobile number or leave the field blank.");
+      setAddressValid(false);
+      return false;
+    }
+
+    const emailValue = (authUser?.email ?? shipping.email).trim();
+    const emailValid = authUser?.email ? true : /\S+@\S+\.\S+/.test(emailValue);
+    if (!emailValid) {
+      setAddressError("Enter a valid email address for order updates.");
+      setAddressValid(false);
+      return false;
+    }
+
+    const updates: Partial<typeof shipping> = {};
+    if (shipping.state.trim() !== stateMatch) {
+      updates.state = stateMatch;
+    }
+    if (shipping.country.trim() !== "India") {
+      updates.country = "India";
+    }
+    if (shipping.zip !== pin) {
+      updates.zip = pin;
+    }
+    if (Object.keys(updates).length > 0) {
+      setShipping((current) => ({ ...current, ...updates }));
+    }
+
+    setAddressError(null);
+    setAddressValid(true);
+    return true;
   }
 
   function goNext() {
@@ -165,13 +469,6 @@ export default function CheckoutPage() {
     } else if (step === 2) {
       setStep(3);
     } else if (step === 3) {
-      if (payTab === "card") {
-        const ok =
-          card.number.replace(/\s/g, "").length >= 12 &&
-          card.exp.trim().length >= 4 &&
-          card.cvc.trim().length >= 3;
-        if (!ok) return;
-      }
       setStep(4);
     }
   }
@@ -180,16 +477,129 @@ export default function CheckoutPage() {
     setStep((prev) => (prev > 1 ? ((prev - 1) as typeof prev) : prev));
   }
 
+  async function handlePlaceOrder(event?: Event) {
+    if (event) {
+      event.preventDefault();
+    }
+    setOrderError(null);
+
+    if (detailedItems.length === 0) {
+      setOrderError("Your checkout session is empty.");
+      return;
+    }
+    const email = (authUser?.email ?? shipping.email).trim();
+    if (!email) {
+      setOrderError("Please provide an email address for order updates.");
+      setStep(1);
+      return;
+    }
+
+    const shippingAddress = createCheckoutAddressFromShipping(shipping);
+    const billingAddress = shippingAddress;
+
+    setIsPlacingOrder(true);
+    try {
+      if (checkoutMode === "buy-now") {
+        const target = detailedItems[0];
+        await submitBuyNowCheckout(
+          {
+            item: {
+              variantId: target.details.variant.id,
+              quantity: target.qty,
+            },
+            shippingAddress,
+            billingAddress,
+            notes: shipping.notes.trim() ? shipping.notes.trim() : undefined,
+            contact: {
+              email,
+              phone: shipping.phone.trim() || undefined,
+            },
+          },
+          { token: authToken ?? undefined }
+        );
+        clearBuyNow();
+      } else {
+        const guestToken = await syncRemoteCart(
+          detailedItems.map((line) => ({
+            variantId: line.details.variant.id,
+            quantity: line.qty,
+          })),
+          { token: authToken ?? undefined }
+        );
+
+        await submitCartCheckout(
+          {
+            shippingAddress,
+            billingAddress,
+            notes: shipping.notes.trim() ? shipping.notes.trim() : undefined,
+            contact: {
+              email,
+              phone: shipping.phone.trim() || undefined,
+            },
+          },
+          {
+            token: authToken ?? undefined,
+            guestToken,
+          }
+        );
+
+        clearCart();
+        clearBuyNow();
+      }
+      router.replace("/account");
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.error("[checkout] order placement failed", error);
+      }
+      if (error instanceof ApiError) {
+        const message = (() => {
+          if (
+            typeof error.body === "object" &&
+            error.body !== null &&
+            "error" in error.body
+          ) {
+            const payload = (error.body as { error?: unknown }).error;
+            if (typeof payload === "object" && payload !== null) {
+              const base =
+                "message" in payload &&
+                typeof (payload as { message?: unknown }).message === "string"
+                  ? (payload as { message: string }).message
+                  : error.message;
+              const detail =
+                "detail" in payload &&
+                typeof (payload as { detail?: unknown }).detail === "string"
+                  ? (payload as { detail: string }).detail
+                  : null;
+              return detail ? `${base} (${detail})` : base;
+            }
+          }
+          return error.message;
+        })();
+        setOrderError(message);
+      } else if (error instanceof Error) {
+        setOrderError(error.message);
+      } else {
+        setOrderError("Unexpected error placing order.");
+      }
+    } finally {
+      setIsPlacingOrder(false);
+    }
+  }
+
   if (detailedItems.length === 0) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
         <Card className="w-full max-w-md rounded-2xl shadow-sm">
           <CardContent className="space-y-4 p-6 text-center">
             <h1 className="text-xl font-semibold">
-              Your cart is currently empty
+              {checkoutMode === "buy-now"
+                ? "Your buy now selection has expired"
+                : "Your cart is currently empty"}
             </h1>
             <p className="text-sm text-gray-600">
-              Add a fragrance to your cart to begin checkout.
+              {checkoutMode === "buy-now"
+                ? "Pick a fragrance and tap Buy Now again to restart checkout."
+                : "Add a fragrance to your cart to begin checkout."}
             </p>
             <Button onClick={() => router.push("/")}>
               Browse The Smelly Water Club
@@ -287,6 +697,19 @@ export default function CheckoutPage() {
                     />
                   </div>
                   <div className="md:col-span-2">
+                    <Label htmlFor="ship-email">Email</Label>
+                    <Input
+                      id="ship-email"
+                      type="email"
+                      value={shipping.email}
+                      onChange={(event) =>
+                        setShipping({ ...shipping, email: event.target.value })
+                      }
+                      required={!authUser}
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
                     <Label htmlFor="ship-line1">Address line 1</Label>
                     <Input
                       id="ship-line1"
@@ -375,7 +798,7 @@ export default function CheckoutPage() {
 
                 {addressValid === false && (
                   <div className="text-sm text-rose-600">
-                    Please double-check your address (ZIP and line 1 required).
+                    {addressError ?? "Please double-check your shipping details."}
                   </div>
                 )}
 
@@ -502,197 +925,50 @@ export default function CheckoutPage() {
                       Card
                     </TabsTrigger>
                     <TabsTrigger
-                      value="wallet"
+                      value="upi"
                       className="flex items-center gap-2"
                     >
-                      <Wallet className="h-4 w-4" />
-                      Wallets
+                      <QrCode className="h-4 w-4" />
+                      UPI
                     </TabsTrigger>
                     <TabsTrigger
-                      value="bnpl"
+                      value="cod"
                       className="flex items-center gap-2"
                     >
-                      <Badge className="border-0 bg-gray-100 text-gray-700">
-                        BNPL
-                      </Badge>
+                      <Package className="h-4 w-4" />
+                      Cash on Delivery
                     </TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="card" className="mt-4">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="md:col-span-2">
-                        <Label htmlFor="card-number">Card number</Label>
-                        <Input
-                          id="card-number"
-                          inputMode="numeric"
-                          placeholder="1234 5678 9012 3456"
-                          value={card.number}
-                          onChange={(event) =>
-                            setCard({ ...card, number: event.target.value })
-                          }
-                        />
+                    <div className="space-y-3 text-sm text-gray-700">
+                      <p>
+                        We’ll hand off to Razorpay so you can securely enter your credit or debit card details.
+                      </p>
+                      <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+                        After placing the order you’ll be redirected to the Razorpay payment window to complete the transaction.
                       </div>
-                      <div>
-                        <Label htmlFor="card-name">Name on card</Label>
-                        <Input
-                          id="card-name"
-                          value={card.name}
-                          onChange={(event) =>
-                            setCard({ ...card, name: event.target.value })
-                          }
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="card-exp">Expiry (MM/YY)</Label>
-                        <Input
-                          id="card-exp"
-                          placeholder="MM/YY"
-                          value={card.exp}
-                          onChange={(event) =>
-                            setCard({ ...card, exp: event.target.value })
-                          }
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="card-cvc">CVC</Label>
-                        <Input
-                          id="card-cvc"
-                          inputMode="numeric"
-                          placeholder="123"
-                          value={card.cvc}
-                          onChange={(event) =>
-                            setCard({ ...card, cvc: event.target.value })
-                          }
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex items-center gap-2">
-                      <Checkbox
-                        id="billing-same"
-                        checked={billingSame}
-                        onCheckedChange={(value) => setBillingSame(value)}
-                      />
-                      <Label htmlFor="billing-same" className="text-sm">
-                        Billing address same as shipping
-                      </Label>
-                    </div>
-
-                    {!billingSame && (
-                      <div className="mt-3 grid gap-4 md:grid-cols-2">
-                        <div className="md:col-span-2">
-                          <Label htmlFor="bill-line1">Address line 1</Label>
-                          <Input
-                            id="bill-line1"
-                            value={billing.line1}
-                            onChange={(event) =>
-                              setBilling({
-                                ...billing,
-                                line1: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bill-city">City</Label>
-                          <Input
-                            id="bill-city"
-                            value={billing.city}
-                            onChange={(event) =>
-                              setBilling({
-                                ...billing,
-                                city: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bill-state">State</Label>
-                          <Input
-                            id="bill-state"
-                            value={billing.state}
-                            onChange={(event) =>
-                              setBilling({
-                                ...billing,
-                                state: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bill-zip">ZIP</Label>
-                          <Input
-                            id="bill-zip"
-                            value={billing.zip}
-                            onChange={(event) =>
-                              setBilling({
-                                ...billing,
-                                zip: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bill-country">Country</Label>
-                          <Input
-                            id="bill-country"
-                            value={billing.country}
-                            onChange={(event) =>
-                              setBilling({
-                                ...billing,
-                                country: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="wallet" className="mt-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Button
-                        variant="outline"
-                        className="h-11 justify-center gap-2"
-                      >
-                        <Apple className="h-5 w-5" />
-                        Apple Pay
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="h-11 justify-center gap-2"
-                      >
-                        <Wallet className="h-5 w-5" />
-                        Google Pay
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="h-11 justify-center gap-2"
-                      >
-                        PayPal
-                      </Button>
-                    </div>
-                    <div className="mt-3 text-xs text-gray-500">
-                      Digital wallet options are shown based on your device and
-                      browser support.
                     </div>
                   </TabsContent>
 
-                  <TabsContent value="bnpl" className="mt-4">
-                    <div className="space-y-2 text-sm text-gray-700">
-                      <div>
-                        Split your purchase into 4 interest-free payments.
+                  <TabsContent value="upi" className="mt-4">
+                    <div className="space-y-3 text-sm text-gray-700">
+                      <p>
+                        Pay instantly using any UPI app such as PhonePe, Google Pay, or BHIM.
+                      </p>
+                      <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+                        You’ll be prompted to approve the payment request in your UPI app right after placing the order.
                       </div>
-                      <div className="text-xs text-gray-500">
-                        Subject to eligibility; provider T&amp;Cs apply.
-                      </div>
-                      <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                        <Button variant="outline" className="h-11">
-                          Klarna
-                        </Button>
-                        <Button variant="outline" className="h-11">
-                          Affirm
-                        </Button>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="cod" className="mt-4">
+                    <div className="space-y-3 text-sm text-gray-700">
+                      <p>
+                        Pay with cash or UPI at the time of delivery. Our courier will contact you prior to arrival.
+                      </p>
+                      <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+                        Please keep the exact amount ready. Orders above ₹7,500 may require a quick reconfirmation call.
                       </div>
                     </div>
                   </TabsContent>
@@ -753,31 +1029,39 @@ export default function CheckoutPage() {
                 <div>
                   <h3 className="mb-2 font-medium">Items</h3>
                   <div className="space-y-3">
-                    {detailedItems.map((item) => (
-                      <div key={item.key} className="flex items-center gap-3">
-                        <div className="h-16 w-16 overflow-hidden rounded-lg bg-gray-100">
-                          <img
-                            src={item.image}
-                            alt={item.name}
-                            className="h-full w-full object-cover"
-                          />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate font-medium">
-                            {item.name}
+                    {detailedItems.map((item) => {
+                      const image =
+                        item.details.product.imageUrl ?? FALLBACK_IMAGE_URL;
+                      const alt =
+                        item.details.product.imageAlt ??
+                        item.details.product.title;
+                      const variantLabel = `${item.details.variant.sizeMl} ml`;
+                      return (
+                        <div key={item.key} className="flex items-center gap-3">
+                          <div className="h-16 w-16 overflow-hidden rounded-lg bg-gray-100">
+                            <img
+                              src={image}
+                              alt={alt}
+                              className="h-full w-full object-cover"
+                            />
                           </div>
-                          <div className="text-xs text-gray-500">
-                            {item.variantLabel} • Qty {item.qty}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium">
+                              {item.details.product.title}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {variantLabel} • Qty {item.qty}
+                            </div>
+                          </div>
+                          <div className="font-semibold">
+                            {formatPaise(item.unitPricePaise * item.qty, {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
                           </div>
                         </div>
-                        <div className="font-semibold">
-                          {formatPaise(item.pricePaise * item.qty, {
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: 0,
-                          })}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -792,12 +1076,22 @@ export default function CheckoutPage() {
                   </Label>
                 </div>
 
+                {orderError && (
+                  <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-600">
+                    {orderError}
+                  </div>
+                )}
+
                 <div className="flex justify-between">
                   <Button variant="outline" onClick={goBack}>
                     Back
                   </Button>
-                  <Button className="bg-pink-600 hover:bg-pink-700">
-                    Place Order
+                  <Button
+          className="bg-pink-600 hover:bg-pink-700"
+          onClick={(event) => handlePlaceOrder(event.nativeEvent)}
+          disabled={isPlacingOrder}
+        >
+                    {isPlacingOrder ? "Placing order…" : "Place Order"}
                   </Button>
                 </div>
 
@@ -852,8 +1146,9 @@ export default function CheckoutPage() {
                   addressValid === false ? "text-rose-600" : "text-gray-600"
                 }`}
               >
-                We’ll validate your address in real-time at purchase. Invalid
-                addresses may delay delivery.
+                {addressValid === false && addressError
+                  ? addressError
+                  : "We’ll validate your address in real-time at purchase. Invalid addresses may delay delivery."}
               </div>
             </CardContent>
           </Card>

@@ -3,14 +3,21 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-type AuthUser = {
+export type AuthUser = {
+  id: string;
   name: string;
   email: string;
+  avatarUrl: string | null;
+  phone: string | null;
+  isSeller: boolean;
+  clubMember: boolean;
+  clubVerified: boolean;
 };
 
 type AuthState = {
   user: AuthUser | null;
-  login: (user: AuthUser) => void;
+  token: string | null;
+  login: (session: { token: string; user: AuthUser }) => void;
   logout: () => void;
 };
 
@@ -27,14 +34,19 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       user: null,
-      login: (user) => set({ user }),
-      logout: () => set({ user: null }),
+      token: null,
+      login: ({ token, user }) => set({ user, token }),
+      logout: () => set({ user: null, token: null }),
     }),
     {
       name: "smelly-water-auth",
       storage: createJSONStorage(() =>
         typeof window === "undefined" ? noopStorage : window.localStorage
       ),
+      partialize: (state) => ({
+        user: state.user,
+        token: state.token,
+      }),
     }
   )
 );

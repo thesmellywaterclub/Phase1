@@ -39,7 +39,9 @@ export function AccountButton({ className }: AccountButtonProps) {
       )}
     >
       <Avatar className="h-8 w-8">
-        <AvatarImage src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=160&q=80" />
+        {authUser.avatarUrl ? (
+          <AvatarImage src={authUser.avatarUrl} alt={displayName} />
+        ) : null}
         <AvatarFallback>{initials}</AvatarFallback>
       </Avatar>
       <span className="hidden sm:inline">{displayName}</span>
