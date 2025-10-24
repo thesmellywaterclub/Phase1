@@ -37,7 +37,9 @@ import {
   submitBuyNowCheckout,
   submitCartCheckout,
   type CheckoutAddressInput,
+  type CheckoutOrder,
 } from "@/data/checkout";
+import { createRazorpaySession, confirmRazorpayPayment } from "@/data/payments";
 import { useAuthStore } from "@/lib/auth-store";
 import { ApiError } from "@/lib/api-client";
 import { syncRemoteCart } from "@/lib/cart-remote";
@@ -214,6 +216,159 @@ const INDIAN_STATE_LOOKUP = (() => {
 
 function isValidIndianPin(pin: string): boolean {
   return /^[1-9][0-9]{5}$/.test(pin.trim());
+}
+
+type RazorpaySuccessResponse = {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+};
+
+type RazorpayCheckoutInstance = {
+  open: () => void;
+  close: () => void;
+  on?: (event: string, handler: (...args: unknown[]) => void) => void;
+};
+
+type RazorpayConstructor = new (options: Record<string, unknown>) => RazorpayCheckoutInstance;
+
+declare global {
+  interface Window {
+    Razorpay?: RazorpayConstructor;
+  }
+}
+
+const RAZORPAY_SCRIPT_ID = "razorpay-checkout-js";
+const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
+
+async function loadRazorpayScript(): Promise<RazorpayConstructor | null> {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  if (window.Razorpay) {
+    return window.Razorpay;
+  }
+
+  return new Promise((resolve) => {
+    const existing = document.getElementById(RAZORPAY_SCRIPT_ID) as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener(
+        "load",
+        () => resolve(window.Razorpay ?? null),
+        { once: true }
+      );
+      existing.addEventListener(
+        "error",
+        () => resolve(null),
+        { once: true }
+      );
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = RAZORPAY_SCRIPT_ID;
+    script.src = RAZORPAY_SCRIPT_SRC;
+    script.async = true;
+    script.onload = () => resolve(window.Razorpay ?? null);
+    script.onerror = () => resolve(null);
+    document.body.appendChild(script);
+  });
+}
+
+async function initiateRazorpayPayment(
+  order: CheckoutOrder,
+  options: {
+    name: string;
+    email: string;
+    phone?: string;
+    guestEmail?: string | null;
+    token?: string | null;
+  }
+): Promise<void> {
+  const session = await createRazorpaySession(
+    order.id,
+    {
+      guestEmail: options.guestEmail ?? undefined,
+      contact: {
+        name: options.name,
+        email: options.email,
+        phone: options.phone,
+      },
+    },
+    { token: options.token ?? undefined }
+  );
+
+  const Razorpay = await loadRazorpayScript();
+  if (!Razorpay) {
+    throw new Error("Unable to load Razorpay checkout. Please try again.");
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    const checkout = new Razorpay({
+      key: session.razorpayKeyId,
+      amount: session.amountPaise,
+      currency: session.currency,
+      name: "The Smelly Water Club",
+      description: `Payment for order ${session.orderId}`,
+      order_id: session.razorpayOrderId,
+      prefill: {
+        name: session.customer.name ?? options.name,
+        email: session.customer.email ?? options.email,
+        contact: session.customer.contact ?? options.phone ?? undefined,
+      },
+      theme: {
+        color: "#db2777",
+      },
+      modal: {
+        ondismiss: () => {
+          if (!settled) {
+            settled = true;
+            reject(new Error("Payment window closed before completion."));
+          }
+        },
+      },
+      handler: async (response: RazorpaySuccessResponse) => {
+        try {
+          await confirmRazorpayPayment(
+            order.id,
+            {
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+              guestEmail: options.guestEmail ?? undefined,
+            },
+            { token: options.token ?? undefined }
+          );
+          settled = true;
+          resolve();
+        } catch (error) {
+          settled = true;
+          reject(error);
+        }
+      },
+    });
+
+    checkout.on?.("payment.failed", (event: { error?: { description?: string } }) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      const message = event?.error?.description ?? "Payment failed. Please try again.";
+      reject(new Error(message));
+    });
+
+    try {
+      checkout.open();
+    } catch (error) {
+      if (!settled) {
+        settled = true;
+        reject(error instanceof Error ? error : new Error("Unable to open payment window."));
+      }
+    }
+  });
 }
 
 function normalizePhoneNumber(phone: string): string {
@@ -498,10 +653,11 @@ export default function CheckoutPage() {
     const billingAddress = shippingAddress;
 
     setIsPlacingOrder(true);
+    let createdOrder: CheckoutOrder | null = null;
     try {
       if (checkoutMode === "buy-now") {
         const target = detailedItems[0];
-        await submitBuyNowCheckout(
+        createdOrder = await submitBuyNowCheckout(
           {
             item: {
               variantId: target.details.variant.id,
@@ -517,7 +673,6 @@ export default function CheckoutPage() {
           },
           { token: authToken ?? undefined }
         );
-        clearBuyNow();
       } else {
         const guestToken = await syncRemoteCart(
           detailedItems.map((line) => ({
@@ -527,7 +682,7 @@ export default function CheckoutPage() {
           { token: authToken ?? undefined }
         );
 
-        await submitCartCheckout(
+        createdOrder = await submitCartCheckout(
           {
             shippingAddress,
             billingAddress,
@@ -542,44 +697,95 @@ export default function CheckoutPage() {
             guestToken,
           }
         );
-
-        clearCart();
-        clearBuyNow();
       }
-      router.replace("/account");
+
+      if (!createdOrder) {
+        throw new Error("Unable to create order. Please try again.");
+      }
+
+      const requiresOnlinePayment =
+        createdOrder.totals.totalPaise > 0 && payTab !== "cod";
+
+      if (requiresOnlinePayment) {
+        await initiateRazorpayPayment(createdOrder, {
+          name: shipping.name.trim() || "Guest Customer",
+          email,
+          phone: shipping.phone.trim() || undefined,
+          guestEmail: authUser ? null : email,
+          token: authToken ?? undefined,
+        });
+      }
+
+      if (checkoutMode !== "buy-now") {
+        clearCart();
+      }
+      clearBuyNow();
+
+      if (authUser) {
+        router.replace("/account");
+      } else {
+        const params = new URLSearchParams({
+          orderId: createdOrder.id,
+          email,
+        });
+        router.replace(`/order-confirmation?${params.toString()}`);
+      }
     } catch (error) {
       if (process.env.NODE_ENV !== "production") {
         console.error("[checkout] order placement failed", error);
       }
-      if (error instanceof ApiError) {
-        const message = (() => {
-          if (
-            typeof error.body === "object" &&
-            error.body !== null &&
-            "error" in error.body
-          ) {
-            const payload = (error.body as { error?: unknown }).error;
-            if (typeof payload === "object" && payload !== null) {
-              const base =
-                "message" in payload &&
-                typeof (payload as { message?: unknown }).message === "string"
-                  ? (payload as { message: string }).message
-                  : error.message;
-              const detail =
-                "detail" in payload &&
-                typeof (payload as { detail?: unknown }).detail === "string"
-                  ? (payload as { detail: string }).detail
-                  : null;
-              return detail ? `${base} (${detail})` : base;
-            }
-          }
-          return error.message;
-        })();
-        setOrderError(message);
-      } else if (error instanceof Error) {
-        setOrderError(error.message);
+      if (createdOrder) {
+        if (checkoutMode !== "buy-now") {
+          clearCart();
+        }
+        clearBuyNow();
+        if (authUser) {
+          const message =
+            error instanceof ApiError
+              ? "Payment could not be completed. Please review your order in your account for next steps."
+              : error instanceof Error
+              ? error.message
+              : "Payment could not be completed. Please check your account for order status.";
+          setOrderError(message);
+          router.replace("/account");
+        } else {
+          const params = new URLSearchParams({
+            orderId: createdOrder.id,
+            email,
+          });
+          router.replace(`/order-confirmation?${params.toString()}`);
+        }
       } else {
-        setOrderError("Unexpected error placing order.");
+        if (error instanceof ApiError) {
+          const message = (() => {
+            if (
+              typeof error.body === "object" &&
+              error.body !== null &&
+              "error" in error.body
+            ) {
+              const payload = (error.body as { error?: unknown }).error;
+              if (typeof payload === "object" && payload !== null) {
+                const base =
+                  "message" in payload &&
+                  typeof (payload as { message?: unknown }).message === "string"
+                    ? (payload as { message: string }).message
+                    : error.message;
+                const detail =
+                  "detail" in payload &&
+                  typeof (payload as { detail?: unknown }).detail === "string"
+                    ? (payload as { detail: string }).detail
+                    : null;
+                return detail ? `${base} (${detail})` : base;
+              }
+            }
+            return error.message;
+          })();
+          setOrderError(message);
+        } else if (error instanceof Error) {
+          setOrderError(error.message);
+        } else {
+          setOrderError("Unexpected error placing order.");
+        }
       }
     } finally {
       setIsPlacingOrder(false);
