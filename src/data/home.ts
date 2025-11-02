@@ -61,10 +61,20 @@ export type HomeProductGalleryItem = {
   ratingCount: number;
 };
 
+export type HomeGenderSection = {
+  id: "men" | "women" | "unisex";
+  title: string;
+  description: string;
+  ctaHref?: string;
+  ctaLabel?: string;
+  products: HomeProductGalleryItem[];
+};
+
 export type HomePageData = {
   hero: HomeHero;
   featuredProducts: Product[];
   productGallery: HomeProductGalleryItem[];
+  genderSections: HomeGenderSection[];
   highlights: HomeHighlight[];
   rituals: HomeRitual[];
   journal: HomeJournalEntry[];
@@ -99,27 +109,55 @@ const fallbackFeaturedProducts = products.slice(0, 4);
 
 const fallbackProductGallery = fallbackFeaturedProducts.map(mapProductToGalleryItem);
 
+function buildFallbackSection(
+  id: HomeGenderSection["id"],
+  title: string,
+  description: string,
+  ctaHref: string,
+  ctaLabel: string,
+): HomeGenderSection {
+  const filtered = fallbackProductGallery.filter((item) => item.gender === id);
+  const productsForSection = filtered.length ? filtered : fallbackProductGallery;
+
+  return {
+    id,
+    title,
+    description,
+    ctaHref,
+    ctaLabel,
+    products: productsForSection,
+  };
+}
+
+const fallbackGenderSections: HomeGenderSection[] = [
+  buildFallbackSection(
+    "men",
+    "For Him",
+    "Cedar, spice, and mineral notes curated for evening silhouettes.",
+    "/products?gender=men",
+    "Shop men's perfumes",
+  ),
+  buildFallbackSection(
+    "women",
+    "For Her",
+    "Bouquets of ambered florals and gourmand ribbons for after-dark rituals.",
+    "/products?gender=women",
+    "Shop women's perfumes",
+  ),
+  buildFallbackSection(
+    "unisex",
+    "For Everyone",
+    "Silhouettes that sway between soft woods and luminous citrus accords.",
+    "/products?gender=unisex",
+    "Shop unisex perfumes",
+  ),
+];
+
 const fallbackHomeData: HomePageData = {
-  hero: {
-    eyebrow: "The Season of Velvet Rituals",
-    heading: "Fragrances composed for evenings that linger.",
-    subheading:
-      "Layer sensorial accords that bloom after dusk. Each bottle is blended in micro batches and signed by the perfumer.",
-    ctas: [
-      {
-        label: "Explore the Atelier",
-        href: "/products",
-        emphasis: true,
-      },
-      {
-        label: "Join the Club",
-        href: "/login",
-      },
-    ],
-    image: homeStaticHeroFallback,
-  },
+  hero: null,
   featuredProducts: fallbackFeaturedProducts,
   productGallery: fallbackProductGallery,
+  genderSections: fallbackGenderSections,
   highlights: [
     {
       id: "atelier",

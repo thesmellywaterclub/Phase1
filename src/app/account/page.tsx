@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Pencil,
@@ -393,7 +394,17 @@ export default function CustomerProfilePage() {
                                 {tracking.status ?? order.status}
                               </span>
                             </p>
-                            {tracking.id ? <p>Tracking ID: {tracking.id}</p> : null}
+                            {tracking.id ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span>Tracking ID: {tracking.id}</span>
+                                <Link
+                                  href={`/tracking?waybill=${encodeURIComponent(tracking.id)}`}
+                                  className="text-xs font-medium text-pink-600 underline-offset-2 hover:underline"
+                                >
+                                  View live status
+                                </Link>
+                              </div>
+                            ) : null}
                             {tracking.carrier ? (
                               <p>Carrier: {tracking.carrier}</p>
                             ) : null}

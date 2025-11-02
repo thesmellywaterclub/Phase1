@@ -30,9 +30,11 @@ export function AccountButton({ className }: AccountButtonProps) {
   const displayName = authUser.name || "Member";
   const initials = displayName.charAt(0).toUpperCase();
 
+  const targetHref = authUser.sellerId ? "/seller" : "/account";
+
   return (
     <Link
-      href="/account"
+      href={targetHref}
       className={cn(
         "inline-flex items-center gap-2 rounded-full border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-400 hover:text-gray-900",
         className

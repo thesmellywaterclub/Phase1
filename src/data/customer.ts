@@ -139,6 +139,7 @@ type ApiUserSummary = {
   isSeller: boolean;
   clubMember: boolean;
   clubVerified: boolean;
+  sellerId: string | null;
 };
 
 type ApiOrderSummary = {

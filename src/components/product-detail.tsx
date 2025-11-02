@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,8 @@ import {
   Plus,
   Minus,
   Sparkles,
+  MapPin,
+  Loader2,
 } from "lucide-react";
 
 import type { Product, ProductVariant } from "@/data/products";
@@ -39,6 +41,11 @@ import { AccountButton } from "@/components/account-button";
 import { SiteSearchBar } from "@/components/site-search-bar";
 import { cn } from "@/lib/utils";
 import { formatPaise } from "@/lib/money";
+import { Input } from "@/components/ui/input";
+import {
+  checkDeliveryServiceability,
+  type ServiceabilityResult,
+} from "@/data/shipments";
 
 type ProductDetailProps = {
   product: Product;
@@ -46,10 +53,16 @@ type ProductDetailProps = {
 };
 
 function getAvailableUnits(variant: ProductVariant): number {
-  if (!variant.inventory) {
-    return Number.POSITIVE_INFINITY;
+  if (variant.inventory) {
+    return Math.max(
+      0,
+      variant.inventory.stock - variant.inventory.reserved
+    );
   }
-  return Math.max(0, variant.inventory.stock - variant.inventory.reserved);
+  if (typeof variant.bestOffer?.stockQty === "number") {
+    return Math.max(0, variant.bestOffer.stockQty);
+  }
+  return Number.POSITIVE_INFINITY;
 }
 
 function isVariantInStock(variant: ProductVariant): boolean {
@@ -58,7 +71,46 @@ function isVariantInStock(variant: ProductVariant): boolean {
 }
 
 function getVariantPrice(variant: ProductVariant): number {
-  return variant.salePaise ?? variant.mrpPaise;
+  return (
+    variant.bestOffer?.price ??
+    variant.salePaise ??
+    variant.mrpPaise
+  );
+}
+
+function formatCurrencyINR(value: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatEstimatedDelivery(result: ServiceabilityResult): string | null {
+  if (result.estimatedDeliveryDate) {
+    try {
+      const date = new Date(result.estimatedDeliveryDate);
+      if (!Number.isNaN(date.getTime())) {
+        return new Intl.DateTimeFormat("en-IN", {
+          month: "short",
+          day: "numeric",
+        }).format(date);
+      }
+    } catch {
+      // ignore invalid date strings
+    }
+  }
+
+  if (
+    typeof result.estimatedDeliveryDays === "number" &&
+    Number.isFinite(result.estimatedDeliveryDays)
+  ) {
+    const days = Math.max(1, Math.round(result.estimatedDeliveryDays));
+    return `in ${days} ${days === 1 ? "day" : "days"}`;
+  }
+
+  return null;
 }
 
 const FALLBACK_IMAGE_URL =
@@ -89,14 +141,21 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
   const availableUnits = getAvailableUnits(variant);
   const inStock = isVariantInStock(variant);
 
+  const [pincode, setPincode] = useState("");
+  const [serviceability, setServiceability] = useState<ServiceabilityResult | null>(null);
+  const [serviceabilityError, setServiceabilityError] = useState<string | null>(null);
+  const [isCheckingServiceability, setIsCheckingServiceability] = useState(false);
+
   const [subscribe, setSubscribe] = useState(false);
   const subDiscount = 0.15;
   const basePrice = getVariantPrice(variant);
   const priceAmount = subscribe
     ? Math.round(basePrice * (1 - subDiscount))
     : basePrice;
+  const effectiveSalePaise =
+    variant.bestOffer?.price ?? variant.salePaise ?? null;
   const compareAtPrice =
-    variant.salePaise !== null && variant.salePaise !== undefined
+    effectiveSalePaise !== null && effectiveSalePaise < variant.mrpPaise
       ? variant.mrpPaise
       : null;
 
@@ -151,6 +210,10 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
     : "Out of stock";
   const ratingAverageDisplay = product.aggregates.ratingAvg.toFixed(1);
   const ratingCount = product.aggregates.ratingCount;
+  const serviceabilityEstimate = useMemo(
+    () => (serviceability ? formatEstimatedDelivery(serviceability) : null),
+    [serviceability]
+  );
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState({ show: false, x: 50, y: 50 });
@@ -226,6 +289,11 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
   }, [variant]);
 
   useEffect(() => {
+    setServiceability(null);
+    setServiceabilityError(null);
+  }, [variant.id]);
+
+  useEffect(() => {
     if (!variantParam) return;
     const matched = product.variants.find((option) => option.id === variantParam);
     if (!matched) return;
@@ -277,6 +345,50 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
       qty,
     });
     router.push("/checkout?mode=buy-now");
+  };
+
+  const handleServiceabilityCheck = async () => {
+    const trimmed = pincode.trim();
+    if (trimmed.length < 4 || trimmed.length > 10) {
+      setServiceability(null);
+      setServiceabilityError("Enter a valid delivery PIN code.");
+      return;
+    }
+
+    setIsCheckingServiceability(true);
+    setServiceabilityError(null);
+
+    const declaredValuePaise = getVariantPrice(variant);
+    const weightEstimate =
+      Number.isFinite(variant.sizeMl) && variant.sizeMl > 0
+        ? Math.round(variant.sizeMl * 1.1)
+        : 500;
+    const weightGrams = Math.max(500, weightEstimate);
+
+    try {
+      const result = await checkDeliveryServiceability(trimmed, {
+        paymentType: "Prepaid",
+        declaredValuePaise,
+        weightGrams,
+      });
+      setServiceability(result);
+    } catch (error) {
+      setServiceability(null);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to check delivery availability right now. Please try again.";
+      setServiceabilityError(message);
+    } finally {
+      setIsCheckingServiceability(false);
+    }
+  };
+
+  const handlePincodeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void handleServiceabilityCheck();
+    }
   };
 
   return (
@@ -470,6 +582,17 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
                       </span>
                     )}
                   </div>
+                  {variant.bestOffer ? (
+                    <div className="mt-1 text-xs text-gray-600">
+                      Best offer by{" "}
+                      <span className="font-semibold text-gray-800">
+                        {variant.bestOffer.sellerName ?? "Trusted seller"}
+                      </span>
+                      {variant.bestOffer.sellerLocationLabel
+                        ? ` • Ships from ${variant.bestOffer.sellerLocationLabel}`
+                        : ""}
+                    </div>
+                  ) : null}
                   {subscribe && (
                     <div className="mt-1 text-xs text-green-700">
                       Subscription applied -{Math.round(subDiscount * 100)}%
@@ -555,13 +678,96 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
                 </div>
               </div>
 
-              <div className="mt-5 flex items-center gap-3 text-sm text-gray-700">
-                <Truck className="h-5 w-5" />
-                <div>
-                  <div>Free express shipping over ₹9,999</div>
-                  <div className="text-gray-500">
-                    Estimated delivery: 2–4 business days
+              <div className="mt-5 space-y-3 rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+                <div className="flex items-center gap-3 text-sm text-gray-700">
+                  <Truck className="h-5 w-5 text-pink-500" />
+                  <div>
+                    <div>Free express shipping over ₹9,999</div>
+                    <div className="text-xs text-gray-500">
+                      Prepaid and COD options where serviceable
+                    </div>
                   </div>
+                </div>
+                <div className="flex flex-col gap-2 text-sm">
+                  <label className="flex items-center gap-2 text-gray-700">
+                    <MapPin className="h-4 w-4 text-pink-500" />
+                    <span>Check delivery availability</span>
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={pincode}
+                      maxLength={10}
+                      onChange={(event) => {
+                        setPincode(event.target.value);
+                        if (serviceabilityError) {
+                          setServiceabilityError(null);
+                        }
+                      }}
+                      onKeyDown={handlePincodeKeyDown}
+                      placeholder="Enter PIN code"
+                      className="flex-1"
+                      inputMode="numeric"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleServiceabilityCheck}
+                      disabled={isCheckingServiceability}
+                      className="shrink-0"
+                    >
+                      {isCheckingServiceability ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      Check
+                    </Button>
+                  </div>
+                  {serviceabilityError ? (
+                    <p className="text-xs text-rose-600">{serviceabilityError}</p>
+                  ) : null}
+                  {serviceability ? (
+                    <div
+                      className={cn(
+                        "rounded-lg border p-3 text-xs",
+                        serviceability.isServiceable
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-rose-200 bg-rose-50 text-rose-600"
+                      )}
+                    >
+                      <p className="font-semibold">
+                        {serviceability.isServiceable
+                          ? "Delivery available to this PIN"
+                          : "Delivery currently unavailable to this PIN"}
+                      </p>
+                      {serviceabilityEstimate ? (
+                        <p className="mt-1 text-current">
+                          Estimated delivery{" "}
+                          <span className="font-semibold">{serviceabilityEstimate}</span>
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-current">
+                        Prepaid:{" "}
+                        <span className="font-semibold">
+                          {serviceability.prepaidAvailable ? "Yes" : "Not available"}
+                        </span>{" "}
+                        • COD:{" "}
+                        <span className="font-semibold">
+                          {serviceability.codAvailable ? "Yes" : "Not available"}
+                        </span>
+                      </p>
+                      {serviceability.charges.total != null ? (
+                        <p className="mt-1 text-current">
+                          Indicative shipping charge{" "}
+                          <span className="font-semibold">
+                            {formatCurrencyINR(serviceability.charges.total)}
+                          </span>
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      Enter your delivery PIN code to confirm availability before checkout.
+                    </p>
+                  )}
                 </div>
               </div>
 

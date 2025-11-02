@@ -78,17 +78,11 @@ export async function submitBuyNowCheckout(
     if (error instanceof ApiError) {
       throw error;
     }
-    const message =
-      error instanceof Error
-        ? error.message || "Unable to reach the checkout service."
-        : "Unable to reach the checkout service.";
-    throw new ApiError("Failed to complete buy-now checkout", 502, {
-      error: {
-        message:
-          "Could not connect to the checkout API. Ensure SWC Core is running and reachable.",
-        detail: message,
-      },
-    });
+    throw new ApiError(
+      "Failed to complete buy-now checkout",
+      500,
+      error instanceof Error ? { message: error.message } : null
+    );
   }
 }
 
@@ -121,16 +115,10 @@ export async function submitCartCheckout(
     if (error instanceof ApiError) {
       throw error;
     }
-    const message =
-      error instanceof Error
-        ? error.message || "Unable to reach the checkout service."
-        : "Unable to reach the checkout service.";
-    throw new ApiError("Failed to complete checkout", 502, {
-      error: {
-        message:
-          "Could not connect to the checkout API. Ensure SWC Core is running and reachable.",
-        detail: message,
-      },
-    });
+    throw new ApiError(
+      "Failed to complete checkout",
+      500,
+      error instanceof Error ? { message: error.message } : null
+    );
   }
 }

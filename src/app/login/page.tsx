@@ -73,6 +73,7 @@ export default function LoginPage() {
             isSeller: boolean;
             clubMember: boolean;
             clubVerified: boolean;
+            sellerId: string | null;
           };
         }>
       >("/api/auth/login", {
@@ -90,6 +91,7 @@ export default function LoginPage() {
         isSeller: user.isSeller,
         clubMember: user.clubMember,
         clubVerified: user.clubVerified,
+        sellerId: user.sellerId,
       };
 
       login({ token, user: authUser });
@@ -185,6 +187,16 @@ export default function LoginPage() {
               className="text-pink-600 hover:text-pink-700"
             >
               Create an account
+            </Link>
+            .
+          </div>
+          <div className="text-center text-sm text-gray-500">
+            Run a fragrance store?{" "}
+            <Link
+              href="/seller/register"
+              className="text-pink-600 hover:text-pink-700"
+            >
+              Register as a seller
             </Link>
             .
           </div>

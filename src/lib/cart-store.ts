@@ -73,6 +73,13 @@ export function buildCartItemDetails(
   const media = getPrimaryMedia(product);
   const mediaUrl = typeof media?.url === "string" ? media.url.trim() : "";
   const mediaAlt = typeof media?.alt === "string" ? media.alt.trim() : "";
+  const effectiveSalePaise =
+    variant.bestOffer?.price ?? variant.salePaise ?? null;
+  const effectiveStock =
+    variant.inventory?.stock ??
+    (typeof variant.bestOffer?.stockQty === "number"
+      ? variant.bestOffer.stockQty
+      : null);
   return {
     product: {
       slug: product.slug,
@@ -86,8 +93,8 @@ export function buildCartItemDetails(
       sku: variant.sku,
       sizeMl: variant.sizeMl,
       mrpPaise: variant.mrpPaise,
-      salePaise: variant.salePaise ?? null,
-      stock: variant.inventory?.stock ?? null,
+      salePaise: effectiveSalePaise,
+      stock: effectiveStock,
       reserved: variant.inventory?.reserved ?? null,
     },
   };

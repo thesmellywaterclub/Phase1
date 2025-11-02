@@ -20,6 +20,19 @@ export type ProductVariantInventory = {
   reserved: number
 }
 
+export type VariantBestOffer = {
+  offerId: string
+  price: number
+  sellerId: string
+  sellerName: string | null
+  sellerDisplayName: string | null
+  sellerLocationLabel: string
+  stockQty: number
+  condition: "NEW" | "OPEN_BOX" | "TESTER"
+  authGrade: "SEALED" | "STORE_BILL" | "VERIFIED_UNKNOWN"
+  computedAt: string
+}
+
 export type ProductVariant = {
   id: string
   sku: string
@@ -28,6 +41,7 @@ export type ProductVariant = {
   salePaise: number | null
   isActive: boolean
   inventory: ProductVariantInventory | null
+  bestOffer: VariantBestOffer | null
 }
 
 export type ProductNotes = {
@@ -135,6 +149,7 @@ function buildVariant(seed: VariantSeed): ProductVariant {
     salePaise: seed.salePaise ?? null,
     isActive: seed.isActive ?? seed.stock > 0,
     inventory,
+    bestOffer: null,
   }
 }
 

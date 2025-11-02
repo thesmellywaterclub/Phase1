@@ -14,6 +14,8 @@ import {
   ArrowRight,
   Calendar,
   Info,
+  MapPin,
+  Loader2,
 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,6 +47,11 @@ import { ApiError } from "@/lib/api-client";
 import { syncRemoteCart } from "@/lib/cart-remote";
 import { getProductBySlug, getProductVariant } from "@/data/products";
 import { formatPaise } from "@/lib/money";
+import {
+  checkDeliveryServiceability,
+  createShipmentsForOrder,
+  type ServiceabilityResult,
+} from "@/data/shipments";
 
 type DetailedItem = {
   key: string;
@@ -64,6 +71,41 @@ function getAvailableUnits(details: CartItemDetails): number {
     return Number.POSITIVE_INFINITY;
   }
   return Math.max(0, stock - reserved);
+}
+
+function formatCurrencyINR(value: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatEstimatedDelivery(result: ServiceabilityResult): string | null {
+  if (result.estimatedDeliveryDate) {
+    try {
+      const date = new Date(result.estimatedDeliveryDate);
+      if (!Number.isNaN(date.getTime())) {
+        return new Intl.DateTimeFormat("en-IN", {
+          month: "short",
+          day: "numeric",
+        }).format(date);
+      }
+    } catch {
+      // ignore invalid date
+    }
+  }
+
+  if (
+    typeof result.estimatedDeliveryDays === "number" &&
+    Number.isFinite(result.estimatedDeliveryDays)
+  ) {
+    const rounded = Math.max(1, Math.round(result.estimatedDeliveryDays));
+    return `in ${rounded} ${rounded === 1 ? "day" : "days"}`;
+  }
+
+  return null;
 }
 
 function splitName(fullName: string) {
@@ -487,6 +529,9 @@ export default function CheckoutPage() {
   });
   const [addressValid, setAddressValid] = useState<boolean | null>(null);
   const [addressError, setAddressError] = useState<string | null>(null);
+  const [serviceability, setServiceability] = useState<ServiceabilityResult | null>(null);
+  const [serviceabilityLoading, setServiceabilityLoading] = useState(false);
+  const [serviceabilityError, setServiceabilityError] = useState<string | null>(null);
 
   type ShipMethod = "standard" | "express" | "overnight";
   const [shipMethod, setShipMethod] = useState<ShipMethod>("standard");
@@ -531,8 +576,63 @@ export default function CheckoutPage() {
       setBuyNowItem({ details: buyNowItem.details, qty: target.qty });
     }
   }, [checkoutMode, buyNowItem, detailedItems, setBuyNowItem]);
+
+  useEffect(() => {
+    setServiceability(null);
+    setServiceabilityError(null);
+  }, [shipping.zip, shipping.city, shipping.state, payTab, subtotalPaise]);
+
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+
+  const paymentType = payTab === "cod" ? "COD" : "Prepaid";
+
+  async function handleServiceabilityCheck() {
+    const pin = shipping.zip.trim();
+    if (pin.length < 4) {
+      setServiceability(null);
+      setServiceabilityError("Enter a valid delivery PIN code.");
+      return;
+    }
+
+    setServiceabilityError(null);
+    setServiceability(null);
+    setServiceabilityLoading(true);
+
+    const weightEstimate = detailedItems.reduce((sum, item) => {
+      const size = item.details.variant.sizeMl;
+      const base = Number.isFinite(size) && size > 0 ? size : 250;
+      return sum + Math.max(250, Math.round(base)) * item.qty;
+    }, 0);
+    const adjustedWeight = Math.round(weightEstimate * 1.1);
+
+    try {
+      const result = await checkDeliveryServiceability(pin, {
+        paymentType,
+        declaredValuePaise: subtotalPaise,
+        weightGrams: adjustedWeight > 0 ? Math.max(500, adjustedWeight) : undefined,
+      });
+      setServiceability(result);
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.error("[checkout] serviceability lookup failed", error);
+      }
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+          ? error.message
+          : "Unable to check delivery availability. Please try again.";
+      setServiceabilityError(message);
+    } finally {
+      setServiceabilityLoading(false);
+    }
+  }
+
+  const serviceabilityEstimate = useMemo(
+    () => (serviceability ? formatEstimatedDelivery(serviceability) : null),
+    [serviceability]
+  );
 
   const tax = Math.round((subtotal + shipRate) * 0.18 * 100) / 100;
   const total = Math.round((subtotal + shipRate + tax) * 100) / 100;
@@ -714,6 +814,33 @@ export default function CheckoutPage() {
           guestEmail: authUser ? null : email,
           token: authToken ?? undefined,
         });
+      }
+
+      if (authUser && authToken && createdOrder.items.length > 0) {
+        try {
+          const shipmentResults = await createShipmentsForOrder(createdOrder, {
+            shippingAddress,
+            contact: {
+              name: shipping.name.trim() || "Guest Customer",
+              email,
+              phone: shipping.phone.trim() || undefined,
+            },
+            paymentType,
+            promisedDeliveryDate: serviceability?.estimatedDeliveryDate ?? null,
+            token: authToken,
+          });
+
+          if (
+            shipmentResults.some((entry) => entry.status === "rejected") &&
+            process.env.NODE_ENV !== "production"
+          ) {
+            console.warn("[checkout] some shipments failed to register", shipmentResults);
+          }
+        } catch (shipmentError) {
+          if (process.env.NODE_ENV !== "production") {
+            console.error("[checkout] shipment creation failed", shipmentError);
+          }
+        }
       }
 
       if (checkoutMode !== "buy-now") {
@@ -957,13 +1084,82 @@ export default function CheckoutPage() {
                   </div>
                   <div>
                     <Label htmlFor="ship-zip">ZIP / PIN</Label>
-                    <Input
-                      id="ship-zip"
-                      value={shipping.zip}
-                      onChange={(event) =>
-                        setShipping({ ...shipping, zip: event.target.value })
-                      }
-                    />
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <Input
+                          id="ship-zip"
+                          className="flex-1"
+                          value={shipping.zip}
+                          onChange={(event) =>
+                            setShipping({ ...shipping, zip: event.target.value })
+                          }
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleServiceabilityCheck}
+                          disabled={serviceabilityLoading}
+                        >
+                          {serviceabilityLoading ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Check delivery
+                        </Button>
+                      </div>
+                      {serviceabilityError ? (
+                        <p className="text-xs text-rose-600">{serviceabilityError}</p>
+                      ) : null}
+                      {serviceability ? (
+                        <div
+                          className={`rounded-lg border p-3 text-xs ${
+                            serviceability.isServiceable
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-rose-200 bg-rose-50 text-rose-600"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 text-sm font-medium">
+                            <MapPin className="h-4 w-4" />
+                            {serviceability.isServiceable
+                              ? "Delivery available to this PIN"
+                              : "Delivery unavailable for this PIN"}
+                          </div>
+                          <div className="mt-2 space-y-1 text-xs text-current">
+                            {serviceabilityEstimate ? (
+                              <p>
+                                Estimated delivery
+                                {" "}
+                                <span className="font-semibold">
+                                  {serviceabilityEstimate}
+                                </span>
+                              </p>
+                            ) : null}
+                            {serviceability.isServiceable ? (
+                              <p>
+                                {paymentType === "COD"
+                                  ? serviceability.codAvailable
+                                    ? "Cash on delivery supported at this location."
+                                    : "Cash on delivery is not available for this PIN."
+                                  : serviceability.prepaidAvailable
+                                  ? "Prepaid courier service is available."
+                                  : "Prepaid courier service is currently unavailable."}
+                              </p>
+                            ) : (
+                              <p>Try a different PIN or contact support for assistance.</p>
+                            )}
+                            {serviceability.charges.total != null ? (
+                              <p>
+                                Indicative shipping charge
+                                {" "}
+                                <span className="font-semibold">
+                                  {formatCurrencyINR(serviceability.charges.total)}
+                                </span>
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                   <div>
                     <Label htmlFor="ship-country">Country</Label>

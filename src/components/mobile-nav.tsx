@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Menu, Search, Sparkles, User2, X } from "lucide-react";
+import { Menu, Search, Sparkles, User2, X, PackageSearch, Store } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -60,7 +60,14 @@ export function MobileNav({ className }: MobileNavProps) {
 
   const menuItems: Array<{ label: string; href: string; icon?: typeof Search }> = [
     { label: "Search", href: "/search", icon: Search },
+    { label: "Track order", href: "/tracking", icon: PackageSearch },
   ];
+
+  if (authUser?.sellerId) {
+    menuItems.push({ label: "Seller console", href: "/seller", icon: Store });
+  } else {
+    menuItems.push({ label: "Become a seller", href: "/seller/register", icon: Store });
+  }
 
   const accountItems = authUser
     ? [

@@ -3,7 +3,6 @@ import Link from "next/link";
 import {
   ArrowRight,
   ArrowUpRight,
-  ChevronRight,
   Leaf,
   MessagesSquare,
   Sparkles,
@@ -27,6 +26,8 @@ const highlightIconMap: Record<string, LucideIcon> = {
   MessagesSquare,
 };
 
+const FALLBACK_HOME_IMAGE = "https://images.unsplash.com/photo-1573537805874-4cedc5d389ce?auto=format&fit=crop&w=1400&q=80";
+
 type HighlightIconProps = {
   name: string;
 };
@@ -38,6 +39,56 @@ function HighlightIcon({ name }: HighlightIconProps) {
 
 export default async function Home() {
   const data = await getHomePageData();
+
+  const renderProductTile = (
+    item: (typeof data.productGallery)[number],
+  ) => {
+    const genderLabel =
+      item.gender === "unisex"
+        ? "Unisex"
+        : item.gender === "men"
+        ? "For Men"
+        : item.gender === "women"
+        ? "For Women"
+        : "For All";
+    const priceLabel =
+      item.lowestPricePaise !== null
+        ? formatPaise(item.lowestPricePaise, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+          })
+        : "Limited release";
+
+    return (
+      <Link
+        key={item.id}
+        href={item.href}
+        className="group block space-y-3 rounded-[2rem] border border-gray-200 bg-white p-3 transition hover:-translate-y-1 hover:border-pink-200 hover:shadow-lg"
+      >
+        <div className="relative aspect-[3/4] overflow-hidden rounded-[1.75rem] bg-gray-100">
+          <Image
+            src={item.image.url}
+            alt={item.image.alt ?? item.title}
+            fill
+            className="object-cover transition duration-500 group-hover:scale-105"
+            sizes="(min-width: 1024px) 20vw, (min-width: 640px) 40vw, 80vw"
+          />
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-gray-900 group-hover:text-pink-600">
+            {item.title}
+          </p>
+          <p className="text-xs uppercase tracking-[0.3em] text-gray-500">
+            {item.brandName} · {genderLabel}
+          </p>
+          <p className="text-sm text-gray-700">{priceLabel}</p>
+          <p className="text-xs text-gray-400">
+            {item.ratingAvg.toFixed(1)} ★ · {item.ratingCount} reviews
+          </p>
+        </div>
+      </Link>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
@@ -68,77 +119,23 @@ export default async function Home() {
       </div>
 
       <main className="mx-auto max-w-7xl space-y-20 px-4 pb-20 pt-12">
-        <section className="overflow-hidden rounded-[2.5rem] border border-gray-200 bg-white px-6 py-10 sm:px-10">
-          <div className="relative">
-            <div className="absolute inset-0 -z-10 bg-gradient-to-br from-rose-50 via-white to-white" />
-            <div className="space-y-8">
-              <div className="space-y-4">
-                <span className="inline-flex items-center rounded-full border border-pink-100 bg-white/60 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-pink-600">
-                  {data.hero.eyebrow}
+        <section className="grid gap-4 sm:grid-cols-3">
+          {data.highlights.map((highlight) => (
+            <div
+              key={highlight.id}
+              className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur"
+            >
+              <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-pink-600">
+                  <HighlightIcon name={highlight.icon} />
                 </span>
-                <h1 className="text-balance text-4xl font-semibold leading-tight tracking-tight md:text-5xl">
-                  {data.hero.heading}
-                </h1>
-                <p className="max-w-2xl text-base text-gray-600 md:text-lg">
-                  {data.hero.subheading}
-                </p>
+                {highlight.title}
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row">
-                {data.hero.ctas.map((cta) => (
-                  <Button
-                    key={cta.label}
-                    asChild
-                    variant={cta.emphasis ? "default" : "outline"}
-                    className={cta.emphasis ? "bg-pink-600 hover:bg-pink-700" : ""}
-                  >
-                    <Link href={cta.href} className="gap-2">
-                      <span>{cta.label}</span>
-                      <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                    </Link>
-                  </Button>
-                ))}
-              </div>
-              <div className="grid gap-4 sm:grid-cols-3">
-                {data.highlights.map((highlight) => (
-                  <div
-                    key={highlight.id}
-                    className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur"
-                  >
-                    <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-pink-600">
-                        <HighlightIcon name={highlight.icon} />
-                      </span>
-                      {highlight.title}
-                    </div>
-                    <p className="mt-2 text-sm text-gray-600">
-                      {highlight.description}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col gap-4 rounded-2xl border border-pink-100 bg-rose-50/70 p-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="space-y-1 text-sm text-gray-700">
-                  <p className="text-xs uppercase tracking-[0.25em] text-pink-500">
-                    Featured ritual
-                  </p>
-                  <div className="font-medium text-gray-900">
-                    Layer Velour with Noir Atelier for an evening veil.
-                  </div>
-                  <p>
-                    A two-step aura that settles into amber vanilla whispers
-                    after midnight.
-                  </p>
-                </div>
-                <Link
-                  href="/products/velour-eau-de-parfum"
-                  className="inline-flex items-center justify-center rounded-full border border-pink-500 px-4 py-2 text-sm font-semibold text-pink-600 transition hover:bg-pink-500 hover:text-white"
-                >
-                  Shop Velour
-                  <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
-                </Link>
-              </div>
+              <p className="mt-2 text-sm text-gray-600">
+                {highlight.description}
+              </p>
             </div>
-          </div>
+          ))}
         </section>
 
         {data.productGallery.length > 0 ? (
@@ -161,56 +158,37 @@ export default async function Home() {
               </Link>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {data.productGallery.map((item) => {
-                const genderLabel =
-                  item.gender === "unisex"
-                    ? "Unisex"
-                    : item.gender === "men"
-                    ? "For Men"
-                    : item.gender === "women"
-                    ? "For Women"
-                    : "For All";
-                const priceLabel =
-                  item.lowestPricePaise !== null
-                    ? formatPaise(item.lowestPricePaise, {
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0,
-                      })
-                    : "Limited release";
-
-                return (
-                  <Link
-                    key={item.id}
-                    href={item.href}
-                    className="group block space-y-3 rounded-[2rem] border border-gray-200 bg-white p-3 transition hover:-translate-y-1 hover:border-pink-200 hover:shadow-lg"
-                  >
-                    <div className="relative aspect-[3/4] overflow-hidden rounded-[1.75rem] bg-gray-100">
-                      <Image
-                        src={item.image.url}
-                        alt={item.image.alt ?? item.title}
-                        fill
-                        className="object-cover transition duration-500 group-hover:scale-105"
-                        sizes="(min-width: 1024px) 20vw, (min-width: 640px) 40vw, 80vw"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold text-gray-900 group-hover:text-pink-600">
-                        {item.title}
-                      </p>
-                      <p className="text-xs uppercase tracking-[0.3em] text-gray-500">
-                        {item.brandName} · {genderLabel}
-                      </p>
-                      <p className="text-sm text-gray-700">{priceLabel}</p>
-                      <p className="text-xs text-gray-400">
-                        {item.ratingAvg.toFixed(1)} ★ · {item.ratingCount} reviews
-                      </p>
-                    </div>
-                  </Link>
-                );
-              })}
+              {data.productGallery.map(renderProductTile)}
             </div>
           </section>
         ) : null}
+
+        {data.genderSections.map((section) =>
+          section.products.length ? (
+            <section key={section.id} className="space-y-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
+                    {section.title}
+                  </h2>
+                  <p className="text-sm text-gray-600">{section.description}</p>
+                </div>
+                {section.ctaHref ? (
+                  <Link
+                    href={section.ctaHref}
+                    className="inline-flex items-center text-sm font-medium text-pink-600 transition hover:text-pink-700"
+                  >
+                    {section.ctaLabel ?? "Browse more"}
+                    <ArrowUpRight className="ml-1 h-4 w-4" aria-hidden="true" />
+                  </Link>
+                ) : null}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {section.products.map(renderProductTile)}
+              </div>
+            </section>
+          ) : null,
+        )}
 
         <section className="space-y-8">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -236,8 +214,8 @@ export default async function Home() {
           <div className="grid gap-8 md:grid-cols-2">
             {data.featuredProducts.map((product) => {
               const primaryMedia = getPrimaryMedia(product);
-              const imageUrl = primaryMedia?.url ?? data.hero.image;
-              const imageAlt = primaryMedia?.alt ?? `${product.title} bottle`;
+                const imageUrl = primaryMedia?.url ?? FALLBACK_HOME_IMAGE;
+                const imageAlt = primaryMedia?.alt ?? `${product.title} bottle`;
               const brandTag = product.brand.name;
               const genderTag =
                 product.gender === "unisex"
@@ -393,7 +371,7 @@ export default async function Home() {
           </div>
           <div className="relative hidden overflow-hidden rounded-[2rem] md:block">
             <Image
-              src={data.rituals[0]?.illustration ?? data.hero.image}
+              src={data.rituals[0]?.illustration ?? FALLBACK_HOME_IMAGE}
               alt=""
               fill
               className="object-cover object-center"

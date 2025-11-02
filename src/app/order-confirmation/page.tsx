@@ -305,6 +305,17 @@ export default function OrderConfirmationPage() {
                       <div className="h-2 w-2 rounded-full bg-emerald-500" />
                       Track your order any time using your order ID and email.
                     </li>
+                    <li className="flex items-center gap-2">
+                      <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                      Use your waybill on our
+                      <Link
+                        href="/tracking"
+                        className="font-medium text-pink-600 underline-offset-2 hover:underline"
+                      >
+                        tracking page
+                      </Link>
+                      for live courier updates.
+                    </li>
                   </ul>
                 </div>
               </div>

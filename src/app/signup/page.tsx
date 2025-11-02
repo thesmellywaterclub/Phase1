@@ -139,6 +139,7 @@ export default function SignupPage() {
             isSeller: boolean;
             clubMember: boolean;
             clubVerified: boolean;
+            sellerId: string | null;
           };
         }>
       >("/api/auth/register", {
@@ -162,6 +163,7 @@ export default function SignupPage() {
         isSeller: account.isSeller,
         clubMember: account.clubMember,
         clubVerified: account.clubVerified,
+        sellerId: account.sellerId,
       };
 
       login({ token, user: authUser });
@@ -316,6 +318,16 @@ export default function SignupPage() {
             Need help?{" "}
             <Link href="/" className="text-pink-600 hover:text-pink-700">
               Return to homepage
+            </Link>
+            .
+          </div>
+          <div className="text-center text-sm text-gray-500">
+            Want to sell on Smelly Water Club?{" "}
+            <Link
+              href="/seller/register"
+              className="text-pink-600 hover:text-pink-700"
+            >
+              Register your store
             </Link>
             .
           </div>
