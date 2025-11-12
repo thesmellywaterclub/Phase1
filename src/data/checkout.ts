@@ -26,6 +26,8 @@ export type BuyNowCheckoutInput = {
   billingAddress: CheckoutAddressInput;
   notes?: string;
   contact?: CheckoutContactInput;
+  paymentMode: "COD" | "PREPAID";
+  pricing?: CheckoutPricingInput;
 };
 
 export type CheckoutOrderTotals = {
@@ -91,6 +93,14 @@ export type CartCheckoutInput = {
   billingAddress: CheckoutAddressInput;
   notes?: string;
   contact?: CheckoutContactInput;
+  paymentMode: "COD" | "PREPAID";
+  pricing?: CheckoutPricingInput;
+};
+
+export type CheckoutPricingInput = {
+  shippingPaise?: number;
+  taxPaise?: number;
+  discountPaise?: number;
 };
 
 type CartCheckoutResponse = ApiResponseEnvelope<CheckoutOrder>;

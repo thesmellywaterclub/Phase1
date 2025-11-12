@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   ArrowRight,
   ArrowUpRight,
+  ChevronRight,
   Leaf,
   MessagesSquare,
   Sparkles,
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SiteSearchBar } from "@/components/site-search-bar";
 import { MobileNav } from "@/components/mobile-nav";
-import { getHomePageData } from "@/data/home";
+import { getHomePageData, type HomePageDataWithSource } from "@/data/home";
 import { getPrimaryMedia } from "@/data/products";
 import { cn } from "@/lib/utils";
 import { formatPaise } from "@/lib/money";
@@ -39,6 +40,8 @@ function HighlightIcon({ name }: HighlightIconProps) {
 
 export default async function Home() {
   const data = await getHomePageData();
+  const isFallbackData =
+    (data as HomePageDataWithSource).__source === "fallback";
 
   const renderProductTile = (
     item: (typeof data.productGallery)[number],
@@ -119,6 +122,12 @@ export default async function Home() {
       </div>
 
       <main className="mx-auto max-w-7xl space-y-20 px-4 pb-20 pt-12">
+        {isFallbackData ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Live catalog is temporarily unavailable. We&apos;re showing a curated preview—please
+            refresh once the connection returns.
+          </div>
+        ) : null}
         <section className="grid gap-4 sm:grid-cols-3">
           {data.highlights.map((highlight) => (
             <div
@@ -266,11 +275,12 @@ export default async function Home() {
                     </div>
                     <div className="flex flex-wrap gap-2 text-sm text-gray-600">
                       {product.variants.map((variant) => {
-                        const stock = variant.inventory?.stock ?? 0;
-                        const reserved = variant.inventory?.reserved ?? 0;
-                        const available = Math.max(0, stock - reserved);
+                        const available = variant.bestOffer?.stockQty ?? 0;
                         const inStock = available > 0;
-                        const pricePaise = variant.salePaise ?? variant.mrpPaise;
+                        const pricePaise =
+                          variant.bestOffer?.price ??
+                          variant.salePaise ??
+                          variant.mrpPaise;
                         const displayPrice = formatPaise(pricePaise, {
                           minimumFractionDigits: 0,
                           maximumFractionDigits: 0,

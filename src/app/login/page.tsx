@@ -36,6 +36,8 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const login = useAuthStore((state) => state.login);
   const user = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
+  const logout = useAuthStore((state) => state.logout);
   const nextParam = searchParams.get("next");
 
   const [email, setEmail] = useState("");
@@ -44,10 +46,21 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      router.replace(nextParam || "/account");
+    if (!user) {
+      return;
     }
-  }, [user, router, nextParam]);
+    const hasAuthCookie =
+      typeof document !== "undefined" &&
+      document.cookie.split(";").some((entry) => entry.trim().startsWith("swc-auth-token="));
+
+    if (!token || !hasAuthCookie) {
+      logout({ redirect: false });
+      return;
+    }
+
+    const target = nextParam || (user.isAdmin ? "/admin" : "/account");
+    router.replace(target);
+  }, [user, token, router, nextParam, logout]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -71,6 +84,7 @@ export default function LoginPage() {
             avatarUrl: string | null;
             phone: string | null;
             isSeller: boolean;
+            isAdmin: boolean;
             clubMember: boolean;
             clubVerified: boolean;
             sellerId: string | null;
@@ -89,6 +103,7 @@ export default function LoginPage() {
         avatarUrl: user.avatarUrl,
         phone: user.phone,
         isSeller: user.isSeller,
+        isAdmin: user.isAdmin,
         clubMember: user.clubMember,
         clubVerified: user.clubVerified,
         sellerId: user.sellerId,
@@ -96,7 +111,7 @@ export default function LoginPage() {
 
       login({ token, user: authUser });
 
-      const next = nextParam || "/account";
+      const next = nextParam || (authUser.isAdmin ? "/admin" : "/account");
       router.replace(next);
     } catch (apiError) {
       if (apiError instanceof ApiError) {

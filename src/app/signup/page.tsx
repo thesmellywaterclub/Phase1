@@ -137,6 +137,7 @@ export default function SignupPage() {
             avatarUrl: string | null;
             phone: string | null;
             isSeller: boolean;
+            isAdmin: boolean;
             clubMember: boolean;
             clubVerified: boolean;
             sellerId: string | null;
@@ -161,6 +162,7 @@ export default function SignupPage() {
         avatarUrl: account.avatarUrl,
         phone: account.phone,
         isSeller: account.isSeller,
+        isAdmin: account.isAdmin,
         clubMember: account.clubMember,
         clubVerified: account.clubVerified,
         sellerId: account.sellerId,

@@ -85,6 +85,10 @@ export type HomePageData = {
   };
 };
 
+export type HomePageDataWithSource = HomePageData & {
+  __source?: "api" | "fallback";
+};
+
 const homeStaticHeroFallback =
   "https://images.unsplash.com/photo-1573537805874-4cedc5d389ce?auto=format&fit=crop&w=1400&q=80";
 
@@ -292,7 +296,7 @@ async function fetchHomeDataFromApi(): Promise<HomePageData | null> {
     const response = await apiFetch<ApiResponseEnvelope<HomePageData>>(
       "/api/home?featuredLimit=4",
     )
-    return response.data
+    return annotateHomeSource(response.data, "api")
   } catch (error) {
     if (process.env.NODE_ENV !== "production") {
       console.error("[home] Falling back to static data", error)
@@ -308,5 +312,19 @@ export async function getHomePageData(): Promise<HomePageData> {
   }
 
   await new Promise((resolve) => setTimeout(resolve, 100))
-  return JSON.parse(JSON.stringify(fallbackHomeData))
+  const clonedFallback = JSON.parse(
+    JSON.stringify(fallbackHomeData),
+  ) as HomePageData
+  return annotateHomeSource(clonedFallback, "fallback")
+}
+
+function annotateHomeSource(
+  payload: HomePageData,
+  source: "api" | "fallback",
+): HomePageData {
+  Object.defineProperty(payload, "__source", {
+    value: source,
+    enumerable: false,
+  })
+  return payload
 }

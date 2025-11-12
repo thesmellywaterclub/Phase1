@@ -187,7 +187,9 @@ export default function CustomerProfilePage() {
               <CardContent className="space-y-6 p-6">
                 <div className="flex items-center gap-6">
                   <Avatar className="h-20 w-20 text-lg">
-                    <AvatarImage src={profile.avatar} />
+                    {profile.avatar ? (
+                      <AvatarImage src={profile.avatar} />
+                    ) : null}
                     <AvatarFallback>{profile.name.charAt(0)}</AvatarFallback>
                   </Avatar>
                   <div>

@@ -15,11 +15,6 @@ export type ProductMedia = {
   isPrimary: boolean
 }
 
-export type ProductVariantInventory = {
-  stock: number
-  reserved: number
-}
-
 export type VariantBestOffer = {
   offerId: string
   price: number
@@ -40,7 +35,6 @@ export type ProductVariant = {
   mrpPaise: number
   salePaise: number | null
   isActive: boolean
-  inventory: ProductVariantInventory | null
   bestOffer: VariantBestOffer | null
 }
 
@@ -111,7 +105,6 @@ type VariantSeed = {
   mrpPaise: number
   salePaise?: number | null
   stock: number
-  reserved?: number
   isActive?: boolean
 }
 
@@ -133,11 +126,19 @@ type ProductSeed = {
 }
 
 function buildVariant(seed: VariantSeed): ProductVariant {
-  const inventory: ProductVariantInventory | null =
-    seed.stock > 0 || seed.reserved
+  const bestOffer: VariantBestOffer | null =
+    seed.stock > 0
       ? {
-          stock: seed.stock,
-          reserved: seed.reserved ?? 0,
+          offerId: `seed-offer-${seed.id}`,
+          price: seed.salePaise ?? seed.mrpPaise,
+          sellerId: "seed-seller",
+          sellerName: "Demo Seller",
+          sellerDisplayName: "Demo Seller",
+          sellerLocationLabel: "Default Warehouse",
+          stockQty: seed.stock,
+          condition: "NEW",
+          authGrade: "SEALED",
+          computedAt: new Date().toISOString(),
         }
       : null
 
@@ -148,8 +149,7 @@ function buildVariant(seed: VariantSeed): ProductVariant {
     mrpPaise: seed.mrpPaise,
     salePaise: seed.salePaise ?? null,
     isActive: seed.isActive ?? seed.stock > 0,
-    inventory,
-    bestOffer: null,
+    bestOffer,
   }
 }
 
@@ -654,7 +654,7 @@ export const products: Product[] = productSeeds.map((seed) => {
       reviewCount: seed.reviewCount ?? seed.ratingCount,
       lowPricePaise,
       inStockVariants: activeVariants.filter(
-        (variant) => (variant.inventory?.stock ?? 0) > 0
+        (variant) => (variant.bestOffer?.stockQty ?? 0) > 0
       ).length,
     },
   }
@@ -672,8 +672,8 @@ function cloneProduct(product: Product): Product {
     media: product.media.map((media) => ({ ...media })),
     variants: product.variants.map((variant) => ({
       ...variant,
-      inventory: variant.inventory
-        ? { ...variant.inventory }
+      bestOffer: variant.bestOffer
+        ? { ...variant.bestOffer }
         : null,
     })),
     aggregates: { ...product.aggregates },

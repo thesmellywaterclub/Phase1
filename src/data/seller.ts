@@ -246,6 +246,7 @@ export type SellerRegistrationResult = {
     fullName: string;
     avatarUrl: string | null;
     isSeller: boolean;
+    isAdmin: boolean;
     clubMember: boolean;
     clubVerified: boolean;
     sellerId: string | null;

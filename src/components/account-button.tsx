@@ -30,7 +30,11 @@ export function AccountButton({ className }: AccountButtonProps) {
   const displayName = authUser.name || "Member";
   const initials = displayName.charAt(0).toUpperCase();
 
-  const targetHref = authUser.sellerId ? "/seller" : "/account";
+  const targetHref = authUser.isAdmin
+    ? "/admin"
+    : authUser.sellerId
+      ? "/seller"
+      : "/account";
 
   return (
     <Link

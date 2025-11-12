@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -48,10 +48,10 @@ import { syncRemoteCart } from "@/lib/cart-remote";
 import { getProductBySlug, getProductVariant } from "@/data/products";
 import { formatPaise } from "@/lib/money";
 import {
-  checkDeliveryServiceability,
   createShipmentsForOrder,
   type ServiceabilityResult,
 } from "@/data/shipments";
+import { useServiceability } from "@/hooks/use-serviceability";
 
 type DetailedItem = {
   key: string;
@@ -66,11 +66,10 @@ function getUnitPricePaise(details: CartItemDetails): number {
 
 function getAvailableUnits(details: CartItemDetails): number {
   const stock = details.variant.stock;
-  const reserved = details.variant.reserved ?? 0;
   if (stock == null) {
-    return Number.POSITIVE_INFINITY;
+    return 0;
   }
-  return Math.max(0, stock - reserved);
+  return Math.max(0, stock);
 }
 
 function formatCurrencyINR(value: number): string {
@@ -368,7 +367,7 @@ async function initiateRazorpayPayment(
         ondismiss: () => {
           if (!settled) {
             settled = true;
-            reject(new Error("Payment window closed before completion."));
+            reject(new Error("Payment failed before completion. Please try again."));
           }
         },
       },
@@ -486,10 +485,13 @@ export default function CheckoutPage() {
         }
 
         const available = getAvailableUnits(details);
+        const normalizedQty = Math.max(1, Math.round(item.qty));
         const qty =
-          available === Number.POSITIVE_INFINITY
-            ? Math.max(1, Math.round(item.qty))
-            : Math.max(1, Math.min(available, Math.round(item.qty)));
+          available > 0 ? Math.min(normalizedQty, available) : 0;
+
+        if (qty <= 0) {
+          return null;
+        }
 
         return {
           key: `${details.product.slug}-${details.variant.id}`,
@@ -501,7 +503,7 @@ export default function CheckoutPage() {
       .filter((entry): entry is DetailedItem => entry !== null);
   }, [checkoutMode, buyNowItem, items]);
 
-  const subtotalPaise = useMemo(
+  const itemsSubtotal = useMemo(
     () =>
       detailedItems.reduce(
         (sum, item) => sum + item.unitPricePaise * item.qty,
@@ -509,7 +511,16 @@ export default function CheckoutPage() {
       ),
     [detailedItems]
   );
-  const subtotal = subtotalPaise / 100;
+  const subtotal = itemsSubtotal;
+  const cartWeightEstimate = useMemo(() => {
+    const baseWeight = detailedItems.reduce((sum, item) => {
+      const size = item.details.variant.sizeMl;
+      const perUnit = Number.isFinite(size) && size > 0 ? Number(size) : 250;
+      const normalized = Math.max(250, Math.round(perUnit * 1.1));
+      return sum + normalized * item.qty;
+    }, 0);
+    return Math.max(500, baseWeight || 0);
+  }, [detailedItems]);
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
@@ -527,28 +538,59 @@ export default function CheckoutPage() {
     date: "",
     notes: "",
   });
+  const [payTab, setPayTab] = useState("card");
+  const paymentType = payTab === "cod" ? "COD" : "Prepaid";
+
   const [addressValid, setAddressValid] = useState<boolean | null>(null);
   const [addressError, setAddressError] = useState<string | null>(null);
-  const [serviceability, setServiceability] = useState<ServiceabilityResult | null>(null);
-  const [serviceabilityLoading, setServiceabilityLoading] = useState(false);
-  const [serviceabilityError, setServiceabilityError] = useState<string | null>(null);
+  const {
+    serviceability,
+    serviceabilityError,
+    isCheckingServiceability,
+    checkServiceability,
+  } = useServiceability(shipping.zip, {
+    declaredValuePaise: itemsSubtotal,
+    weightGrams: cartWeightEstimate,
+    paymentType: paymentType === "COD" ? "COD" : "Prepaid",
+  });
 
-  type ShipMethod = "standard" | "express" | "overnight";
+type ShipMethod = "standard" | "express" | "overnight" | "live";
   const [shipMethod, setShipMethod] = useState<ShipMethod>("standard");
-  const shipRate =
-    shipMethod === "standard"
+  useEffect(() => {
+    if (hasLiveQuote && shipMethod !== "live") {
+      setShipMethod("live");
+    } else if (!hasLiveQuote && shipMethod === "live") {
+      setShipMethod("standard");
+    }
+  }, [ shipMethod]);
+
+  const delhiveryCharge = useMemo(() => {
+    if (!serviceability) {
+      return null;
+    }
+    if (paymentType === "COD") {
+      return (
+        serviceability.charges.cod ??
+        serviceability.charges.total ??
+        serviceability.charges.base
+      );
+    }
+    return serviceability.charges.total ?? serviceability.charges.base;
+  }, [serviceability, paymentType]);
+
+  const hasLiveQuote = typeof delhiveryCharge === "number" && Number.isFinite(delhiveryCharge);
+
+  const shipRate = useMemo(() => {
+    if (hasLiveQuote) {
+      return Math.max(0, Math.round(delhiveryCharge));
+    }
+    return shipMethod === "standard"
       ? 299
       : shipMethod === "express"
       ? 599
       : 999;
-  const shipEta =
-    shipMethod === "standard"
-      ? "3–5 business days"
-      : shipMethod === "express"
-      ? "2–3 business days"
-      : "1–2 business days";
+  }, [hasLiveQuote, delhiveryCharge, shipMethod]);
 
-  const [payTab, setPayTab] = useState("card");
   useEffect(() => {
     if (!authUser) {
       return;
@@ -577,76 +619,89 @@ export default function CheckoutPage() {
     }
   }, [checkoutMode, buyNowItem, detailedItems, setBuyNowItem]);
 
-  useEffect(() => {
-    setServiceability(null);
-    setServiceabilityError(null);
-  }, [shipping.zip, shipping.city, shipping.state, payTab, subtotalPaise]);
-
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
-
-  const paymentType = payTab === "cod" ? "COD" : "Prepaid";
-
-  async function handleServiceabilityCheck() {
-    const pin = shipping.zip.trim();
-    if (pin.length < 4) {
-      setServiceability(null);
-      setServiceabilityError("Enter a valid delivery PIN code.");
-      return;
-    }
-
-    setServiceabilityError(null);
-    setServiceability(null);
-    setServiceabilityLoading(true);
-
-    const weightEstimate = detailedItems.reduce((sum, item) => {
-      const size = item.details.variant.sizeMl;
-      const base = Number.isFinite(size) && size > 0 ? size : 250;
-      return sum + Math.max(250, Math.round(base)) * item.qty;
-    }, 0);
-    const adjustedWeight = Math.round(weightEstimate * 1.1);
-
-    try {
-      const result = await checkDeliveryServiceability(pin, {
-        paymentType,
-        declaredValuePaise: subtotalPaise,
-        weightGrams: adjustedWeight > 0 ? Math.max(500, adjustedWeight) : undefined,
-      });
-      setServiceability(result);
-    } catch (error) {
-      if (process.env.NODE_ENV !== "production") {
-        console.error("[checkout] serviceability lookup failed", error);
-      }
-      const message =
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
-          ? error.message
-          : "Unable to check delivery availability. Please try again.";
-      setServiceabilityError(message);
-    } finally {
-      setServiceabilityLoading(false);
-    }
-  }
-
-  const serviceabilityEstimate = useMemo(
-    () => (serviceability ? formatEstimatedDelivery(serviceability) : null),
-    [serviceability]
+  const isCodAllowed = Boolean(
+    serviceability?.isServiceable && serviceability.codAvailable
   );
+
+  useEffect(() => {
+    if (payTab === "cod" && !isCodAllowed) {
+      setPayTab("card");
+    }
+  }, [payTab, isCodAllowed]);
+
+  const handleServiceabilityCheck = useCallback(() => {
+    void checkServiceability();
+  }, [checkServiceability]);
+
+const serviceabilityEstimate = useMemo(
+  () => (serviceability ? formatEstimatedDelivery(serviceability) : null),
+  [serviceability]
+);
+
+const shipEta =
+  serviceabilityEstimate ??
+  (shipMethod === "standard"
+    ? "3–5 business days"
+    : shipMethod === "express"
+    ? "2–3 business days"
+    : "1–2 business days");
+
+  const shippingPinDisplay = useMemo(
+    () => (shipping.zip.trim() || "this PIN"),
+    [shipping.zip]
+  );
+
+  type ShippingOption = {
+    value: ShipMethod;
+    label: string;
+    eta: string;
+    description?: string;
+    amount: number;
+  };
+
+  const shippingOptions = useMemo<ShippingOption[]>(() => {
+    if (hasLiveQuote) {
+      return [
+        {
+          value: "live",
+          label: serviceability?.isServiceable
+            ? `Deliver to ${shippingPinDisplay}`
+            : "Courier delivery",
+          eta: shipEta,
+          description: serviceabilityEstimate
+            ? `Estimated delivery ${shipEta}`
+            : "Dynamic courier rate",
+          amount: shipRate,
+        },
+      ];
+    }
+    return [
+      {
+        value: "standard",
+        label: "Standard",
+        eta: "3–5 business days",
+        amount: 299,
+      },
+      {
+        value: "express",
+        label: "Express",
+        eta: "2–3 business days",
+        amount: 599,
+      },
+      {
+        value: "overnight",
+        label: "Overnight",
+        eta: "1–2 business days",
+        amount: 999,
+      },
+    ];
+  }, [hasLiveQuote, serviceability?.isServiceable, shippingPinDisplay, serviceabilityEstimate, shipRate, shipEta]);
+
 
   const tax = Math.round((subtotal + shipRate) * 0.18 * 100) / 100;
   const total = Math.round((subtotal + shipRate + tax) * 100) / 100;
-
-  const estDate = useMemo(() => {
-    const d = new Date();
-    const add =
-      shipMethod === "standard" ? 4 : shipMethod === "express" ? 3 : 2;
-    d.setDate(d.getDate() + add);
-    return d.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-  }, [shipMethod]);
 
   function validateAddress() {
     const line1 = shipping.line1.trim();
@@ -751,6 +806,8 @@ export default function CheckoutPage() {
 
     const shippingAddress = createCheckoutAddressFromShipping(shipping);
     const billingAddress = shippingAddress;
+  const shippingCharge = Math.max(0, Math.round(shipRate));
+  const taxCharge = Math.max(0, Math.round(tax));
 
     setIsPlacingOrder(true);
     let createdOrder: CheckoutOrder | null = null;
@@ -769,6 +826,11 @@ export default function CheckoutPage() {
             contact: {
               email,
               phone: shipping.phone.trim() || undefined,
+            },
+            paymentMode: payTab === "cod" ? "COD" : "PREPAID",
+            pricing: {
+              shippingPaise: shippingCharge,
+              taxPaise: taxCharge,
             },
           },
           { token: authToken ?? undefined }
@@ -790,6 +852,11 @@ export default function CheckoutPage() {
             contact: {
               email,
               phone: shipping.phone.trim() || undefined,
+            },
+            paymentMode: payTab === "cod" ? "COD" : "PREPAID",
+            pricing: {
+              shippingPaise: shippingCharge,
+              taxPaise: taxCharge,
             },
           },
           {
@@ -862,26 +929,13 @@ export default function CheckoutPage() {
         console.error("[checkout] order placement failed", error);
       }
       if (createdOrder) {
-        if (checkoutMode !== "buy-now") {
-          clearCart();
-        }
-        clearBuyNow();
-        if (authUser) {
-          const message =
-            error instanceof ApiError
-              ? "Payment could not be completed. Please review your order in your account for next steps."
-              : error instanceof Error
-              ? error.message
-              : "Payment could not be completed. Please check your account for order status.";
-          setOrderError(message);
-          router.replace("/account");
-        } else {
-          const params = new URLSearchParams({
-            orderId: createdOrder.id,
-            email,
-          });
-          router.replace(`/order-confirmation?${params.toString()}`);
-        }
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : error instanceof Error
+            ? error.message
+            : "Payment could not be completed. Please try again.";
+        setOrderError(message);
       } else {
         if (error instanceof ApiError) {
           const message = (() => {
@@ -993,7 +1047,7 @@ export default function CheckoutPage() {
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Calendar className="h-4 w-4" />
                     Estimated delivery:{" "}
-                    <span className="font-medium">{estDate}</span>
+                    <span className="font-medium">{shipEta}</span>
                   </div>
                 </div>
 
@@ -1090,18 +1144,22 @@ export default function CheckoutPage() {
                           id="ship-zip"
                           className="flex-1"
                           value={shipping.zip}
-                          onChange={(event) =>
-                            setShipping({ ...shipping, zip: event.target.value })
-                          }
+                          maxLength={6}
+                          onChange={(event) => {
+                            const digitsOnly = event.target.value
+                              .replace(/\D/g, "")
+                              .slice(0, 6);
+                            setShipping({ ...shipping, zip: digitsOnly });
+                          }}
                         />
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           onClick={handleServiceabilityCheck}
-                          disabled={serviceabilityLoading}
+                          disabled={isCheckingServiceability}
                         >
-                          {serviceabilityLoading ? (
+                          {isCheckingServiceability ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           ) : null}
                           Check delivery
@@ -1121,8 +1179,8 @@ export default function CheckoutPage() {
                           <div className="flex items-center gap-2 text-sm font-medium">
                             <MapPin className="h-4 w-4" />
                             {serviceability.isServiceable
-                              ? "Delivery available to this PIN"
-                              : "Delivery unavailable for this PIN"}
+                              ? `Delivery available to ${shippingPinDisplay}`
+                              : `Not deliverable to ${shippingPinDisplay}`}
                           </div>
                           <div className="mt-2 space-y-1 text-xs text-current">
                             {serviceabilityEstimate ? (
@@ -1135,15 +1193,20 @@ export default function CheckoutPage() {
                               </p>
                             ) : null}
                             {serviceability.isServiceable ? (
-                              <p>
-                                {paymentType === "COD"
-                                  ? serviceability.codAvailable
-                                    ? "Cash on delivery supported at this location."
-                                    : "Cash on delivery is not available for this PIN."
-                                  : serviceability.prepaidAvailable
-                                  ? "Prepaid courier service is available."
-                                  : "Prepaid courier service is currently unavailable."}
-                              </p>
+                              <>
+                                <p>
+                                  Prepaid:{" "}
+                                  <span className="font-semibold">Available</span>
+                                </p>
+                                <p>
+                                  Cash on delivery:{" "}
+                                  <span className="font-semibold">
+                                    {serviceability.codAvailable
+                                      ? "Available"
+                                      : "Not available"}
+                                  </span>
+                                </p>
+                              </>
                             ) : (
                               <p>Try a different PIN or contact support for assistance.</p>
                             )}
@@ -1228,64 +1291,37 @@ export default function CheckoutPage() {
                   onValueChange={(value) => setShipMethod(value as ShipMethod)}
                   className="space-y-3"
                 >
-                  <label className="flex cursor-pointer items-center justify-between rounded-xl border p-3">
-                    <div className="flex items-center gap-3">
-                      <RadioGroupItem value="standard" id="ship-standard" />
-                      <div>
-                        <div className="font-medium">Standard</div>
-                        <div className="text-xs text-gray-600">
-                          3–5 business days
+                  {shippingOptions.map((option) => (
+                    <label
+                      key={option.value}
+                      className="flex cursor-pointer items-center justify-between rounded-xl border p-3"
+                    >
+                      <div className="flex items-center gap-3">
+                        <RadioGroupItem
+                          value={option.value}
+                          id={`ship-${option.value}`}
+                          disabled={shippingOptions.length === 1}
+                        />
+                        <div>
+                          <div className="font-medium">{option.label}</div>
+                          <div className="text-xs text-gray-600">
+                            {option.description ?? option.eta}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="font-semibold">
-                      {formatPaise(299, {
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0,
-                      })}
-                    </div>
-                  </label>
-
-                  <label className="flex cursor-pointer items-center justify-between rounded-xl border p-3">
-                    <div className="flex items-center gap-3">
-                      <RadioGroupItem value="express" id="ship-express" />
-                      <div>
-                        <div className="font-medium">Express</div>
-                        <div className="text-xs text-gray-600">
-                          2–3 business days
-                        </div>
+                      <div className="font-semibold">
+                        {formatPaise(option.amount, {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 0,
+                        })}
                       </div>
-                    </div>
-                    <div className="font-semibold">
-                      {formatPaise(599, {
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0,
-                      })}
-                    </div>
-                  </label>
-
-                  <label className="flex cursor-pointer items-center justify-between rounded-xl border p-3">
-                    <div className="flex items-center gap-3">
-                      <RadioGroupItem value="overnight" id="ship-overnight" />
-                      <div>
-                        <div className="font-medium">Overnight</div>
-                        <div className="text-xs text-gray-600">
-                          1–2 business days
-                        </div>
-                      </div>
-                    </div>
-                    <div className="font-semibold">
-                      {formatPaise(999, {
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0,
-                      })}
-                    </div>
-                  </label>
+                    </label>
+                  ))}
                 </RadioGroup>
 
                 <div className="text-sm text-gray-600">
                   Estimated delivery:{" "}
-                  <span className="font-medium">{estDate}</span>
+                  <span className="font-medium">{shipEta}</span>
                 </div>
 
                 <div className="flex justify-between">
@@ -1336,6 +1372,7 @@ export default function CheckoutPage() {
                     <TabsTrigger
                       value="cod"
                       className="flex items-center gap-2"
+                      disabled={!isCodAllowed}
                     >
                       <Package className="h-4 w-4" />
                       Cash on Delivery
@@ -1365,14 +1402,20 @@ export default function CheckoutPage() {
                   </TabsContent>
 
                   <TabsContent value="cod" className="mt-4">
-                    <div className="space-y-3 text-sm text-gray-700">
-                      <p>
-                        Pay with cash or UPI at the time of delivery. Our courier will contact you prior to arrival.
-                      </p>
-                      <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-                        Please keep the exact amount ready. Orders above ₹7,500 may require a quick reconfirmation call.
+                    {isCodAllowed ? (
+                      <div className="space-y-3 text-sm text-gray-700">
+                        <p>
+                          Pay with cash or UPI at the time of delivery. Our courier will contact you prior to arrival.
+                        </p>
+                        <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+                          Please keep the exact amount ready. Orders above ₹7,500 may require a quick reconfirmation call.
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                        Cash on delivery isn&apos;t available for {shippingPinDisplay}. Please pick a prepaid option instead.
+                      </div>
+                    )}
                   </TabsContent>
                 </Tabs>
 
@@ -1421,7 +1464,7 @@ export default function CheckoutPage() {
                     <h3 className="mb-1 font-medium">Delivery</h3>
                     <div className="text-sm text-gray-700">
                       {shipMethod.toUpperCase()} • {shipEta} • ETA{" "}
-                      <span className="font-medium">{estDate}</span>
+                      <span className="font-medium">{shipEta}</span>
                     </div>
                   </div>
                 </div>

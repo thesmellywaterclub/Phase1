@@ -145,6 +145,7 @@ export default function SellerRegistrationPage() {
         avatarUrl: result.user.avatarUrl,
         phone: result.user.phone,
         isSeller: result.user.isSeller,
+        isAdmin: result.user.isAdmin,
         clubMember: result.user.clubMember,
         clubVerified: result.user.clubVerified,
         sellerId: result.user.sellerId,

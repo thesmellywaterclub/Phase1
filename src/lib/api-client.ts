@@ -1,6 +1,9 @@
+const DEFAULT_TIMEOUT_MS = 10_000;
+
 type ApiClientInit = Omit<RequestInit, "body"> & {
   token?: string;
   json?: unknown;
+  timeoutMs?: number;
 };
 
 export type ApiResponseEnvelope<T> = {
@@ -10,12 +13,14 @@ export type ApiResponseEnvelope<T> = {
 export class ApiError extends Error {
   status: number;
   body: unknown;
+  cause?: unknown;
 
-  constructor(message: string, status: number, body: unknown) {
+  constructor(message: string, status: number, body: unknown, options?: { cause?: unknown }) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.cause = options?.cause;
   }
 }
 
@@ -67,6 +72,26 @@ function mergeHeaders(init?: HeadersInit): Headers {
   return headers;
 }
 
+function handleUnauthorized() {
+  try {
+    const { logout } = useAuthStore.getState();
+    logout();
+  } catch {
+    // store not initialised on server; ignore logout
+  }
+
+  if (typeof window !== "undefined") {
+    const currentPath = window.location.pathname + window.location.search;
+    const loginUrl =
+      currentPath && !currentPath.startsWith("/login")
+        ? `/login?next=${encodeURIComponent(currentPath)}`
+        : "/login";
+    if (window.location.pathname !== loginUrl) {
+      window.location.replace(loginUrl);
+    }
+  }
+}
+
 export async function apiFetch<T>(
   path: string,
   init: ApiClientInit = {},
@@ -76,7 +101,10 @@ export async function apiFetch<T>(
     ? path
     : `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 
-  const { token, json, ...requestInit } = init;
+  const { token, json, timeoutMs, ...requestInit } = init;
+  const controller = new AbortController();
+  const timeout = timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   const headers = mergeHeaders(requestInit.headers);
   if (!headers.has("Accept")) {
@@ -94,24 +122,50 @@ export async function apiFetch<T>(
     requestInit.body = JSON.stringify(json);
   }
 
-  const response = await fetch(url, {
-    ...requestInit,
-    headers,
-    cache: requestInit.cache ?? "no-store",
-  });
+  try {
+    const response = await fetch(url, {
+      ...requestInit,
+      headers,
+      cache: requestInit.cache ?? "no-store",
+      signal: controller.signal,
+    });
 
-  const contentType = response.headers.get("content-type") ?? "";
-  const isJson = contentType.includes("application/json");
+    const contentType = response.headers.get("content-type") ?? "";
+    const isJson = contentType.includes("application/json");
 
-  const payload = isJson ? await response.json().catch(() => null) : null;
+    const payload = isJson ? await response.json().catch(() => null) : null;
 
-  if (!response.ok) {
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleUnauthorized();
+      }
+      throw new ApiError(
+        `API request failed with status ${response.status}`,
+        response.status,
+        payload,
+      );
+    }
+
+    return (payload as T) ?? ({} as T);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new ApiError(
+        `Request timed out after ${timeout} ms`,
+        0,
+        null,
+        { cause: error },
+      );
+    }
     throw new ApiError(
-      `API request failed with status ${response.status}`,
-      response.status,
-      payload,
+      "Network request failed",
+      0,
+      null,
+      { cause: error instanceof Error ? error : undefined },
     );
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return (payload as T) ?? ({} as T);
 }

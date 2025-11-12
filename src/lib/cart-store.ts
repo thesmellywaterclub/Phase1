@@ -25,7 +25,6 @@ type CartVariantSnapshot = {
   mrpPaise: number;
   salePaise: number | null;
   stock: number | null;
-  reserved: number | null;
 };
 
 export type CartItemDetails = {
@@ -76,10 +75,9 @@ export function buildCartItemDetails(
   const effectiveSalePaise =
     variant.bestOffer?.price ?? variant.salePaise ?? null;
   const effectiveStock =
-    variant.inventory?.stock ??
-    (typeof variant.bestOffer?.stockQty === "number"
+    typeof variant.bestOffer?.stockQty === "number"
       ? variant.bestOffer.stockQty
-      : null);
+      : null;
   return {
     product: {
       slug: product.slug,
@@ -95,7 +93,6 @@ export function buildCartItemDetails(
       mrpPaise: variant.mrpPaise,
       salePaise: effectiveSalePaise,
       stock: effectiveStock,
-      reserved: variant.inventory?.reserved ?? null,
     },
   };
 }
@@ -121,12 +118,10 @@ function clampQuantity(qty: number, snapshot: CartItemDetails | null): number {
   }
   const stock = snapshot?.variant.stock;
   if (typeof stock === "number") {
-    const reserved = snapshot?.variant.reserved ?? 0;
-    const max = Math.max(0, stock - reserved);
-    if (max <= 0) {
+    if (stock <= 0) {
       return 0;
     }
-    return Math.min(normalized, max);
+    return Math.min(normalized, stock);
   }
   return normalized;
 }

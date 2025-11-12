@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
@@ -42,10 +43,8 @@ import { SiteSearchBar } from "@/components/site-search-bar";
 import { cn } from "@/lib/utils";
 import { formatPaise } from "@/lib/money";
 import { Input } from "@/components/ui/input";
-import {
-  checkDeliveryServiceability,
-  type ServiceabilityResult,
-} from "@/data/shipments";
+import { type ServiceabilityResult } from "@/data/shipments";
+import { useServiceability } from "@/hooks/use-serviceability";
 
 type ProductDetailProps = {
   product: Product;
@@ -53,21 +52,14 @@ type ProductDetailProps = {
 };
 
 function getAvailableUnits(variant: ProductVariant): number {
-  if (variant.inventory) {
-    return Math.max(
-      0,
-      variant.inventory.stock - variant.inventory.reserved
-    );
-  }
   if (typeof variant.bestOffer?.stockQty === "number") {
     return Math.max(0, variant.bestOffer.stockQty);
   }
-  return Number.POSITIVE_INFINITY;
+  return 0;
 }
 
 function isVariantInStock(variant: ProductVariant): boolean {
-  const available = getAvailableUnits(variant);
-  return Number.isFinite(available) ? available > 0 : true;
+  return getAvailableUnits(variant) > 0;
 }
 
 function getVariantPrice(variant: ProductVariant): number {
@@ -141,10 +133,29 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
   const availableUnits = getAvailableUnits(variant);
   const inStock = isVariantInStock(variant);
 
+  const variantDeclaredValuePaise = useMemo(
+    () => getVariantPrice(variant),
+    [variant]
+  );
+
+  const variantWeightGrams = useMemo(() => {
+    if (Number.isFinite(variant.sizeMl) && variant.sizeMl > 0) {
+      return Math.max(500, Math.round(variant.sizeMl * 1.1));
+    }
+    return 500;
+  }, [variant]);
+
   const [pincode, setPincode] = useState("");
-  const [serviceability, setServiceability] = useState<ServiceabilityResult | null>(null);
-  const [serviceabilityError, setServiceabilityError] = useState<string | null>(null);
-  const [isCheckingServiceability, setIsCheckingServiceability] = useState(false);
+
+  const {
+    serviceability,
+    serviceabilityError,
+    isCheckingServiceability,
+    checkServiceability,
+  } = useServiceability(pincode, {
+    declaredValuePaise: variantDeclaredValuePaise,
+    weightGrams: variantWeightGrams,
+  });
 
   const [subscribe, setSubscribe] = useState(false);
   const subDiscount = 0.15;
@@ -204,15 +215,17 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
         })
       : null;
   const stockBadgeLabel = inStock
-    ? Number.isFinite(availableUnits)
-      ? `In stock (${availableUnits})`
-      : "In stock"
+    ? `In stock (${availableUnits})`
     : "Out of stock";
   const ratingAverageDisplay = product.aggregates.ratingAvg.toFixed(1);
   const ratingCount = product.aggregates.ratingCount;
   const serviceabilityEstimate = useMemo(
     () => (serviceability ? formatEstimatedDelivery(serviceability) : null),
     [serviceability]
+  );
+  const pincodeDisplay = useMemo(
+    () => (pincode.trim() ? pincode.trim() : "this PIN"),
+    [pincode]
   );
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -289,11 +302,6 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
   }, [variant]);
 
   useEffect(() => {
-    setServiceability(null);
-    setServiceabilityError(null);
-  }, [variant.id]);
-
-  useEffect(() => {
     if (!variantParam) return;
     const matched = product.variants.find((option) => option.id === variantParam);
     if (!matched) return;
@@ -347,42 +355,9 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
     router.push("/checkout?mode=buy-now");
   };
 
-  const handleServiceabilityCheck = async () => {
-    const trimmed = pincode.trim();
-    if (trimmed.length < 4 || trimmed.length > 10) {
-      setServiceability(null);
-      setServiceabilityError("Enter a valid delivery PIN code.");
-      return;
-    }
-
-    setIsCheckingServiceability(true);
-    setServiceabilityError(null);
-
-    const declaredValuePaise = getVariantPrice(variant);
-    const weightEstimate =
-      Number.isFinite(variant.sizeMl) && variant.sizeMl > 0
-        ? Math.round(variant.sizeMl * 1.1)
-        : 500;
-    const weightGrams = Math.max(500, weightEstimate);
-
-    try {
-      const result = await checkDeliveryServiceability(trimmed, {
-        paymentType: "Prepaid",
-        declaredValuePaise,
-        weightGrams,
-      });
-      setServiceability(result);
-    } catch (error) {
-      setServiceability(null);
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to check delivery availability right now. Please try again.";
-      setServiceabilityError(message);
-    } finally {
-      setIsCheckingServiceability(false);
-    }
-  };
+  const handleServiceabilityCheck = useCallback(() => {
+    void checkServiceability();
+  }, [checkServiceability]);
 
   const handlePincodeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
@@ -395,21 +370,21 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
     <div className="min-h-screen bg-white text-gray-900">
       <header className="sticky top-0 z-40 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
-          <a href="#" className="order-1 font-extrabold tracking-wide">
+          <Link href="/" className="order-1 font-extrabold tracking-wide">
             The Smelly Water Club
-          </a>
+          </Link>
           <Separator
             orientation="vertical"
             className="order-2 mx-1 hidden h-5 sm:block"
           />
           <nav className="order-3 flex flex-wrap items-center gap-1 text-sm text-gray-500 sm:flex-nowrap sm:gap-2">
-            <a className="hover:text-gray-900" href="#">
+            <Link className="hover:text-gray-900" href="/">
               Home
-            </a>
+            </Link>
             <span className="text-gray-300">/</span>
-            <a className="hover:text-gray-900" href="#">
-              Women
-            </a>
+            <Link className="hover:text-gray-900" href={`/products?gender=${product.gender}`}>
+              {formatGenderLabel(product.gender)}
+            </Link>
             <span className="text-gray-300">/</span>
             <span className="text-gray-800">{product.title}</span>
           </nav>
@@ -518,53 +493,85 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
             ))}
           </div>
 
-          <div className="hidden grid-cols-2 gap-4 lg:grid">
-            {galleryMedia.slice(0, 4).map((media, index) => (
-              <div
-                key={media.id}
-                ref={index === 0 ? wrapRef : undefined}
-                onMouseEnter={() =>
-                  setZoom((z) => ({ ...z, show: index === 0 }))
-                }
-                onMouseLeave={() => setZoom((z) => ({ ...z, show: false }))}
-                onMouseMove={(event) => {
-                  if (!wrapRef.current || index !== 0) return;
-                  const rect = wrapRef.current.getBoundingClientRect();
-                  const x = ((event.clientX - rect.left) / rect.width) * 100;
-                  const y = ((event.clientY - rect.top) / rect.height) * 100;
-                  setZoom({ show: true, x, y });
-                }}
-                className="relative aspect-square overflow-hidden rounded-2xl bg-gray-100"
+          <div className="hidden gap-4 lg:flex">
+            <div className="flex w-24 flex-col gap-3 overflow-y-auto pr-1">
+              {galleryMedia.map((media, index) => (
+                <button
+                  key={media.id}
+                  type="button"
+                  onClick={() => setActive(index)}
+                  className={cn(
+                    "relative overflow-hidden rounded-xl border transition",
+                    index === active
+                      ? "border-pink-500 shadow"
+                      : "border-transparent hover:border-gray-300"
+                  )}
+                >
+                  <img
+                    src={media.url}
+                    alt={media.alt ?? product.title}
+                    className="h-24 w-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+            <div
+              ref={wrapRef}
+              onMouseEnter={() => setZoom((z) => ({ ...z, show: true }))}
+              onMouseLeave={() => setZoom((z) => ({ ...z, show: false }))}
+              onMouseMove={(event) => {
+                if (!wrapRef.current) return;
+                const rect = wrapRef.current.getBoundingClientRect();
+                const x = ((event.clientX - rect.left) / rect.width) * 100;
+                const y = ((event.clientY - rect.top) / rect.height) * 100;
+                setZoom({ show: true, x, y });
+              }}
+              className="relative flex-1 overflow-hidden rounded-2xl bg-gray-100"
+            >
+              <img
+                src={galleryMedia[active]?.url ?? FALLBACK_IMAGE_URL}
+                alt={galleryMedia[active]?.alt ?? product.title}
+                className="h-full w-full object-cover"
+              />
+              <button
+                onClick={prev}
+                type="button"
+                className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 p-2 shadow transition hover:bg-white"
               >
-                <img
-                  src={media.url}
-                  alt={media.alt ?? `${product.title} gallery view`}
-                  className="h-full w-full object-cover"
-                />
-                {index === 0 && zoom.show && (
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                onClick={next}
+                type="button"
+                className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 p-2 shadow transition hover:bg-white"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+              {zoom.show && (
+                <>
                   <div
-                    className="pointer-events-none absolute hidden h-[200px] w-[200px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-white/70 xl:block"
+                    className="pointer-events-none absolute hidden h-[220px] w-[220px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-white/70 xl:block"
                     style={{
                       left: `${zoom.x}%`,
                       top: `${zoom.y}%`,
-                      backgroundImage: `url(${media.url})`,
+                      backgroundImage: `url(${galleryMedia[active]?.url ?? FALLBACK_IMAGE_URL})`,
                       backgroundSize: `220% 220%`,
                       backgroundPosition: `${zoom.x}% ${zoom.y}%`,
                     }}
                   />
-                )}
-              </div>
-            ))}
-            <div className="col-span-2 overflow-hidden rounded-2xl bg-gray-100">
-              <img
-                src={
-                  galleryMedia[4]?.url ??
-                  galleryMedia[0]?.url ??
-                  FALLBACK_IMAGE_URL
-                }
-                alt={galleryMedia[4]?.alt ?? galleryMedia[0]?.alt ?? product.title}
-                className="h-[520px] w-full object-cover"
-              />
+                  <div className="pointer-events-none absolute -right-36 top-1/2 hidden h-72 w-72 -translate-y-1/2 overflow-hidden rounded-2xl border bg-white shadow-2xl 2xl:block">
+                    <div
+                      className="h-full w-full"
+                      style={{
+                        backgroundImage: `url(${galleryMedia[active]?.url ?? FALLBACK_IMAGE_URL})`,
+                        backgroundRepeat: "no-repeat",
+                        backgroundSize: "220%",
+                        backgroundPosition: `${zoom.x}% ${zoom.y}%`,
+                      }}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </section>
@@ -696,12 +703,10 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <Input
                       value={pincode}
-                      maxLength={10}
+                      maxLength={6}
                       onChange={(event) => {
-                        setPincode(event.target.value);
-                        if (serviceabilityError) {
-                          setServiceabilityError(null);
-                        }
+                        const digitsOnly = event.target.value.replace(/\D/g, "").slice(0, 6);
+                        setPincode(digitsOnly);
                       }}
                       onKeyDown={handlePincodeKeyDown}
                       placeholder="Enter PIN code"
@@ -735,8 +740,8 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
                     >
                       <p className="font-semibold">
                         {serviceability.isServiceable
-                          ? "Delivery available to this PIN"
-                          : "Delivery currently unavailable to this PIN"}
+                          ? `Delivery available to ${pincodeDisplay}`
+                          : `Not deliverable to ${pincodeDisplay}`}
                       </p>
                       {serviceabilityEstimate ? (
                         <p className="mt-1 text-current">
@@ -746,12 +751,11 @@ export function ProductDetail({ product, relatedProducts = [] }: ProductDetailPr
                       ) : null}
                       <p className="mt-1 text-current">
                         Prepaid:{" "}
+                        <span className="font-semibold">Yes</span> • COD:{" "}
                         <span className="font-semibold">
-                          {serviceability.prepaidAvailable ? "Yes" : "Not available"}
-                        </span>{" "}
-                        • COD:{" "}
-                        <span className="font-semibold">
-                          {serviceability.codAvailable ? "Yes" : "Not available"}
+                          {serviceability.isServiceable && serviceability.codAvailable
+                            ? "Available"
+                            : "Not available"}
                         </span>
                       </p>
                       {serviceability.charges.total != null ? (

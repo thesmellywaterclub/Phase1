@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Menu, Search, Sparkles, User2, X, PackageSearch, Store } from "lucide-react";
+import { Menu, Search, Sparkles, User2, X, PackageSearch, Store, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -71,6 +71,9 @@ export function MobileNav({ className }: MobileNavProps) {
 
   const accountItems = authUser
     ? [
+        ...(authUser.isAdmin
+          ? [{ label: "Admin portal", href: "/admin", icon: ShieldCheck }]
+          : []),
         { label: "My Account", href: "/account", icon: User2 },
         { label: "Sign out", action: handleSignOut, isAccent: true },
       ]

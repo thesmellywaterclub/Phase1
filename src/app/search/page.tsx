@@ -5,7 +5,7 @@ import { AccountButton } from "@/components/account-button";
 import { CartIndicator } from "@/components/cart-indicator";
 import { SiteSearchBar } from "@/components/site-search-bar";
 import { MobileNav } from "@/components/mobile-nav";
-import { getHomePageData } from "@/data/home";
+import { getHomePageData, type HomePageDataWithSource } from "@/data/home";
 import { fetchProducts } from "@/data/products";
 import {
   buildSearchSuggestions,
@@ -28,6 +28,8 @@ type SearchPageProps = {
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
   const homeData = await getHomePageData();
+  const isFallbackData =
+    (homeData as HomePageDataWithSource).__source === "fallback";
   const journalEntries = homeData.journal;
   const initialQuery = searchParams?.q ?? "";
   const productList = await fetchProducts({
@@ -88,6 +90,13 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           initialValue={initialQuery}
         />
       </div>
+
+      {isFallbackData ? (
+        <div className="mx-auto mt-4 max-w-7xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Live catalog search is paused while we reconnect to the backend. Showing cached
+          recommendations for now.
+        </div>
+      ) : null}
 
       <SearchPageContent
         initialQuery={initialQuery}

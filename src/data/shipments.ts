@@ -17,6 +17,14 @@ type ServiceabilityEnvelope = ApiResponseEnvelope<{
 
 export type ServiceabilityResult = ServiceabilityEnvelope["data"];
 
+type ShippingChargesEnvelope = ApiResponseEnvelope<{
+  charges: {
+    total: number | null;
+    base: number | null;
+    cod: number | null;
+  };
+}>;
+
 type TrackingEnvelope = ApiResponseEnvelope<{
   waybill: string;
   currentStatus: string;
@@ -113,6 +121,60 @@ type ShippingContact = {
   email: string;
   phone?: string;
 };
+
+export async function calculateShippingCharges(
+  destinationPincode: string,
+  options: {
+    paymentType: "Prepaid" | "COD";
+    weightGrams?: number;
+    declaredValuePaise?: number;
+    mode?: "E" | "S";
+  }
+): Promise<ShippingChargesEnvelope["data"]> {
+  const declaredValueRupees =
+    typeof options.declaredValuePaise === "number"
+      ? Number((options.declaredValuePaise / 100).toFixed(2))
+      : undefined;
+
+  const weightGrams =
+    typeof options.weightGrams === "number" && options.weightGrams > 0
+      ? options.weightGrams
+      : undefined;
+
+  const response = await apiFetch<ShippingChargesEnvelope>("/api/shipments/charges", {
+    method: "POST",
+    json: {
+      origin: {
+        pincode: STORE_PICKUP_LOCATION.pincode,
+        city: STORE_PICKUP_LOCATION.city,
+        state: STORE_PICKUP_LOCATION.state,
+      },
+      destination: {
+        pincode: destinationPincode,
+      },
+      shipment: {
+        paymentType: options.paymentType,
+        weightGrams,
+        declaredValue: declaredValueRupees,
+        mode: options.mode,
+      },
+    },
+  });
+
+  return response.data;
+}
+
+export async function calculateShippingQuote(
+  destinationPincode: string,
+  options: {
+    paymentType: "Prepaid" | "COD";
+    weightGrams?: number;
+    declaredValuePaise?: number;
+    mode?: "E" | "S";
+  }
+): Promise<ShippingChargesEnvelope["data"]> {
+  return calculateShippingCharges(destinationPincode, options);
+}
 
 export async function createShipmentsForOrder(
   order: CheckoutOrder,

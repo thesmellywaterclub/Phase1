@@ -10,6 +10,7 @@ export type AuthUser = {
   avatarUrl: string | null;
   phone: string | null;
   isSeller: boolean;
+  isAdmin: boolean;
   clubMember: boolean;
   clubVerified: boolean;
   sellerId: string | null;
@@ -19,7 +20,7 @@ type AuthState = {
   user: AuthUser | null;
   token: string | null;
   login: (session: { token: string; user: AuthUser }) => void;
-  logout: () => void;
+  logout: (options?: { redirect?: boolean }) => void;
   updateUser: (user: AuthUser) => void;
 };
 
@@ -80,9 +81,13 @@ export const useAuthStore = create<AuthState>()(
         syncAuthCookies(token, user.sellerId);
         set({ user, token });
       },
-      logout: () => {
+      logout: (options) => {
         clearAuthCookies();
         set({ user: null, token: null });
+        const shouldRedirect = options?.redirect !== false;
+        if (shouldRedirect && typeof window !== "undefined") {
+          window.location.replace("/login");
+        }
       },
       updateUser: (user) => {
         const token = get().token;

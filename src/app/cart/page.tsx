@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ChevronRight,
+  Loader2,
   Minus,
   Plus,
   ShoppingCart as CartIcon,
@@ -37,6 +38,7 @@ import {
   type Product,
 } from "@/data/products";
 import { formatPaise } from "@/lib/money";
+import { useServiceability } from "@/hooks/use-serviceability";
 
 type DetailedCartItem = {
   key: string;
@@ -50,11 +52,10 @@ function getVariantUnitPrice(details: CartItemDetails): number {
 
 function getVariantAvailableUnits(details: CartItemDetails): number {
   const stock = details.variant.stock;
-  const reserved = details.variant.reserved ?? 0;
   if (stock == null) {
-    return Number.POSITIVE_INFINITY;
+    return 0;
   }
-  return Math.max(0, stock - reserved);
+  return Math.max(0, stock);
 }
 
 const FALLBACK_IMAGE_URL =
@@ -86,14 +87,17 @@ export default function ShoppingCartPage() {
         }
 
         const available = getVariantAvailableUnits(details);
-        const normalizedQty =
-          available === Number.POSITIVE_INFINITY
-            ? Math.max(1, Math.round(cartItem.qty))
-            : Math.max(1, Math.min(available, Math.round(cartItem.qty)));
+        const normalizedQty = Math.max(1, Math.round(cartItem.qty));
+        const clampedQty =
+          available > 0 ? Math.min(normalizedQty, available) : 0;
+
+        if (clampedQty <= 0) {
+          return null;
+        }
 
         return {
           key: `${details.product.slug}-${details.variant.id}`,
-          qty: normalizedQty,
+          qty: clampedQty,
           details,
         };
       })
@@ -184,6 +188,30 @@ export default function ShoppingCartPage() {
     setPromoError(null);
   }, []);
 
+  const cartWeightEstimate = useMemo(() => {
+    const total = detailedItems.reduce((sum, item) => {
+      const size = item.details.variant.sizeMl;
+      const perUnit = Number.isFinite(size) && size > 0 ? Number(size) : 250;
+      return sum + Math.max(250, Math.round(perUnit * 1.1)) * item.qty;
+    }, 0);
+    return Math.max(500, total || 0);
+  }, [detailedItems]);
+
+  const {
+    serviceability,
+    serviceabilityError,
+    isCheckingServiceability,
+    checkServiceability,
+  } = useServiceability(zip, {
+    declaredValuePaise: Math.round(rawSubtotal),
+    weightGrams: cartWeightEstimate,
+  });
+
+  const zipDisplay = useMemo(
+    () => (zip.trim() || "this PIN"),
+    [zip]
+  );
+
   const calcShipping = useCallback(() => {
     const subtotal = taxableSubtotal;
     if (subtotal <= 0) {
@@ -209,9 +237,7 @@ export default function ShoppingCartPage() {
     next: number
   ) {
     const available = getVariantAvailableUnits(details);
-    const max = Number.isFinite(available)
-      ? Math.max(0, available)
-      : Number.POSITIVE_INFINITY;
+    const max = Math.max(0, available);
     const clamped =
       max <= 0 ? 0 : Math.max(1, Math.min(Math.round(next), max));
     setItemQuantity(slug, variantId, clamped);
@@ -478,9 +504,23 @@ export default function ShoppingCartPage() {
                   <Input
                     placeholder="ZIP / PIN code"
                     value={zip}
-                    onChange={(event) => setZip(event.target.value)}
+                    maxLength={6}
+                    onChange={(event) => {
+                      const digitsOnly = event.target.value.replace(/\D/g, "").slice(0, 6);
+                      setZip(digitsOnly);
+                    }}
                   />
-                  <Button variant="outline" onClick={calcShipping}>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      calcShipping();
+                      void checkServiceability();
+                    }}
+                    disabled={isCheckingServiceability}
+                  >
+                    {isCheckingServiceability ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : null}
                     Calculate
                   </Button>
                 </div>
@@ -502,6 +542,41 @@ export default function ShoppingCartPage() {
                       • ETA{" "}
                       <span className="font-medium">{etaDate}</span>
                     </>
+                  )}
+                </div>
+                <div className="mt-2 text-xs">
+                  {serviceabilityError ? (
+                    <p className="text-rose-600">{serviceabilityError}</p>
+                  ) : serviceability ? (
+                    <div
+                      className={`rounded-lg border p-3 ${
+                        serviceability.isServiceable
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-rose-200 bg-rose-50 text-rose-600"
+                      }`}
+                    >
+                      <p className="font-semibold text-sm">
+                        {serviceability.isServiceable
+                          ? `Delivery available to ${zipDisplay}`
+                          : `Not deliverable to ${zipDisplay}`}
+                      </p>
+                      {serviceability.isServiceable ? (
+                        <p className="mt-1 text-current">
+                          Prepaid: <span className="font-semibold">Yes</span> • COD:{" "}
+                          <span className="font-semibold">
+                            {serviceability.codAvailable ? "Available" : "Not available"}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-current">
+                          Try another pincode or contact support for help.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500">
+                      Enter your PIN to confirm delivery options and COD availability.
+                    </p>
                   )}
                 </div>
               </div>
