@@ -54,23 +54,6 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           >
             The Smelly Water Club
           </Link>
-          <nav className="hidden items-center gap-6 text-sm text-gray-600 lg:flex">
-            <Link href="/products" className="transition hover:text-gray-900">
-              Collection
-            </Link>
-            <Link href="/search" className="font-medium text-gray-900">
-              Search
-            </Link>
-            <Link href="/account" className="transition hover:text-gray-900">
-              My Account
-            </Link>
-            <Link href="/cart" className="transition hover:text-gray-900">
-              Cart
-            </Link>
-            <Link href="/login" className="transition hover:text-gray-900">
-              Sign In
-            </Link>
-          </nav>
           <div className="ml-auto flex items-center gap-3">
             <MobileNav />
             <SiteSearchBar

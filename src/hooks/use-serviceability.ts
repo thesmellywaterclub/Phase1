@@ -65,14 +65,19 @@ export function useServiceability(
             declaredValuePaise: snapshot.declaredValuePaise,
             weightGrams: snapshot.weightGrams,
           });
+          const preferredQuote =
+            charges.quotes.find((quote) => quote.mode === "E") ??
+            charges.quotes[0] ??
+            null;
+          const quoteCharges = preferredQuote?.charges ?? charges.charges;
           enriched = {
             ...result,
             charges: {
               total:
-                charges.charges.total ?? result.charges.total ?? null,
+                quoteCharges.total ?? result.charges.total ?? null,
               base:
-                charges.charges.base ?? result.charges.base ?? null,
-              cod: charges.charges.cod ?? result.charges.cod ?? null,
+                quoteCharges.base ?? result.charges.base ?? null,
+              cod: quoteCharges.cod ?? result.charges.cod ?? null,
             },
           };
         } catch (quoteError) {

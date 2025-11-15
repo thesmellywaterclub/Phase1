@@ -17,12 +17,23 @@ type ServiceabilityEnvelope = ApiResponseEnvelope<{
 
 export type ServiceabilityResult = ServiceabilityEnvelope["data"];
 
+type ShippingQuoteMode = "E" | "S";
+
+export type ShippingChargeBreakdown = {
+  total: number | null;
+  base: number | null;
+  cod: number | null;
+};
+
+export type ShippingQuoteSummary = {
+  mode: ShippingQuoteMode;
+  charges: ShippingChargeBreakdown;
+};
+
 type ShippingChargesEnvelope = ApiResponseEnvelope<{
-  charges: {
-    total: number | null;
-    base: number | null;
-    cod: number | null;
-  };
+  charges: ShippingChargeBreakdown;
+  mode: ShippingQuoteMode;
+  quotes: ShippingQuoteSummary[];
 }>;
 
 type TrackingEnvelope = ApiResponseEnvelope<{

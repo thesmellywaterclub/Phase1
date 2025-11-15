@@ -267,34 +267,21 @@ export function SearchPageContent({
   return (
     <main className="mx-auto max-w-7xl px-4 pb-20 pt-10">
       <div className="space-y-12">
-        <section className="overflow-hidden rounded-[2.5rem] border border-gray-200 bg-white/80 px-6 py-10 shadow-sm backdrop-blur sm:px-10">
-          <div className="max-w-3xl space-y-6">
-            <div className="space-y-3">
-              <span className="inline-flex items-center rounded-full border border-pink-100 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-pink-600">
-                Atelier search
-              </span>
-              <h1 className="text-balance text-3xl font-semibold leading-tight text-gray-900 md:text-4xl">
-                Discover compositions, rituals, and stories in one place.
-              </h1>
-              <p className="text-sm text-gray-600 md:text-base">
-                Browse our eau de parfums, layering rituals, and journal features curated by the atelier.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs uppercase tracking-[0.3em] text-gray-400">
-                Trending
-              </span>
-              {suggestions.map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onClick={() => handleSuggestion(suggestion)}
-                  className="rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-600 transition hover:border-pink-200 hover:bg-pink-50 hover:text-pink-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200"
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
+        <section className="overflow-hidden rounded-[2.5rem] border border-gray-200 bg-white/80 px-6 py-8 shadow-sm backdrop-blur sm:px-10">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs uppercase tracking-[0.3em] text-gray-400">
+              Trending searches
+            </span>
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => handleSuggestion(suggestion)}
+                className="rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-600 transition hover:border-pink-200 hover:bg-pink-50 hover:text-pink-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200"
+              >
+                {suggestion}
+              </button>
+            ))}
           </div>
         </section>
 

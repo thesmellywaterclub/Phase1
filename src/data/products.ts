@@ -778,5 +778,14 @@ export function getDefaultVariant(productSlug: string) {
 }
 
 export function getPrimaryMedia(product: Product): ProductMedia | null {
-  return product.media.find((media) => media.isPrimary) ?? product.media[0] ?? null
+  const primary = product.media.find((media) => media.isPrimary) ?? product.media[0] ?? null
+  if (process.env.NODE_ENV !== "production") {
+    console.info("[products] resolved primary media", {
+      productId: product.id,
+      productTitle: product.title,
+      mediaId: primary?.id ?? null,
+      mediaUrl: primary?.url ?? null,
+    })
+  }
+  return primary
 }

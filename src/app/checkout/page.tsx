@@ -48,6 +48,7 @@ import { syncRemoteCart } from "@/lib/cart-remote";
 import { getProductBySlug, getProductVariant } from "@/data/products";
 import { formatPaise } from "@/lib/money";
 import {
+  calculateShippingCharges,
   createShipmentsForOrder,
   type ServiceabilityResult,
 } from "@/data/shipments";
@@ -59,6 +60,36 @@ type DetailedItem = {
   details: CartItemDetails;
   unitPricePaise: number;
 };
+
+type ShippingQuoteMode = "E" | "S";
+
+type ShippingQuoteEntry = {
+  mode: ShippingQuoteMode;
+  charges: {
+    total: number | null;
+    base: number | null;
+    cod: number | null;
+  };
+};
+
+function resolveQuoteAmount(entry: ShippingQuoteEntry): number | null {
+  return (
+    entry.charges.total ??
+    entry.charges.base ??
+    entry.charges.cod ??
+    null
+  );
+}
+
+function shipMethodToQuoteMode(method: ShipMethod): ShippingQuoteMode | null {
+  if (method === "live_E") {
+    return "E";
+  }
+  if (method === "live_S") {
+    return "S";
+  }
+  return null;
+}
 
 function getUnitPricePaise(details: CartItemDetails): number {
   return details.variant.salePaise ?? details.variant.mrpPaise;
@@ -554,42 +585,211 @@ export default function CheckoutPage() {
     paymentType: paymentType === "COD" ? "COD" : "Prepaid",
   });
 
-type ShipMethod = "standard" | "express" | "overnight" | "live";
-  const [shipMethod, setShipMethod] = useState<ShipMethod>("standard");
+  const [shippingQuote, setShippingQuote] = useState<{
+    quotes: ShippingQuoteEntry[];
+    isLoading: boolean;
+    error: string | null;
+  }>({
+    quotes: [],
+    isLoading: false,
+    error: null,
+  });
+
   useEffect(() => {
-    if (hasLiveQuote && shipMethod !== "live") {
-      setShipMethod("live");
-    } else if (!hasLiveQuote && shipMethod === "live") {
-      setShipMethod("standard");
+    const pin = shipping.zip.trim();
+    if (!isValidIndianPin(pin)) {
+      setShippingQuote({
+        quotes: [],
+        isLoading: false,
+        error: null,
+      });
+      return;
     }
-  }, [ shipMethod]);
 
-  const delhiveryCharge = useMemo(() => {
-    if (!serviceability) {
-      return null;
-    }
-    if (paymentType === "COD") {
-      return (
-        serviceability.charges.cod ??
-        serviceability.charges.total ??
-        serviceability.charges.base
+    let cancelled = false;
+    setShippingQuote((prev) => ({
+      quotes: prev.quotes,
+      isLoading: true,
+      error: null,
+    }));
+
+    const modes: ShippingQuoteMode[] = ["E", "S"];
+
+    (async () => {
+      const requests = await Promise.all(
+        modes.map(async (mode) => {
+          try {
+            const response = await calculateShippingCharges(pin, {
+              paymentType: paymentType === "COD" ? "COD" : "Prepaid",
+              weightGrams: cartWeightEstimate,
+              declaredValuePaise: itemsSubtotal,
+              mode,
+            });
+
+            const entry =
+              response.quotes?.find((quote) => quote.mode === mode) ??
+              response.quotes?.[0] ??
+              (response.charges
+                ? {
+                    mode: response.mode ?? mode,
+                    charges: response.charges,
+                  }
+                : null);
+
+            if (!entry) {
+              return { mode, quote: null, error: new Error("Quote missing") };
+            }
+
+            const amount = resolveQuoteAmount(entry);
+            if (amount === null) {
+              return { mode, quote: null, error: new Error("Quote incomplete") };
+            }
+
+            return {
+              mode,
+              quote: {
+                mode,
+                charges: entry.charges,
+              } as ShippingQuoteEntry,
+              error: null,
+            };
+          } catch (error) {
+            return { mode, quote: null, error };
+          }
+        })
       );
-    }
-    return serviceability.charges.total ?? serviceability.charges.base;
-  }, [serviceability, paymentType]);
 
-  const hasLiveQuote = typeof delhiveryCharge === "number" && Number.isFinite(delhiveryCharge);
+      if (cancelled) {
+        return;
+      }
+
+      const successfulQuotes = requests
+        .filter((result): result is { mode: ShippingQuoteMode; quote: ShippingQuoteEntry } =>
+          Boolean(result.quote)
+        )
+        .map((result) => result.quote);
+
+      if (successfulQuotes.length > 0) {
+        setShippingQuote({
+          quotes: successfulQuotes,
+          isLoading: false,
+          error: null,
+        });
+        return;
+      }
+
+      const firstError = requests.find((result) => result.error)?.error;
+      const message =
+        firstError instanceof ApiError
+          ? firstError.message
+          : firstError instanceof Error
+          ? firstError.message
+          : "Unable to fetch live shipping charges right now.";
+
+      setShippingQuote({
+        quotes: [],
+        isLoading: false,
+        error: message,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    shipping.zip,
+    paymentType,
+    cartWeightEstimate,
+    itemsSubtotal,
+  ]);
+
+type ShipMethod = "standard" | "express" | "overnight" | "live_E" | "live_S";
+  const [shipMethod, setShipMethod] = useState<ShipMethod>("standard");
+
+  const usingServiceabilityFallback =
+    shippingQuote.quotes.length === 0 && Boolean(serviceability);
+
+  const availableQuotes = useMemo<ShippingQuoteEntry[]>(() => {
+    if (shippingQuote.quotes.length > 0) {
+      return shippingQuote.quotes;
+    }
+    if (serviceability) {
+      const fallbackCharges: ShippingQuoteEntry["charges"] = {
+        total: serviceability.charges.total,
+        base: serviceability.charges.base,
+        cod: serviceability.charges.cod,
+      };
+      return [
+        {
+          mode: "E",
+          charges: fallbackCharges,
+        },
+        {
+          mode: "S",
+          charges: fallbackCharges,
+        },
+      ];
+    }
+    return [];
+  }, [shippingQuote.quotes, serviceability]);
+
+  const displayedQuoteAmount = useMemo(() => {
+    const preferred =
+      availableQuotes.find((quote) => quote.mode === "E") ??
+      availableQuotes[0] ??
+      null;
+    if (preferred) {
+      return resolveQuoteAmount(preferred);
+    }
+    return null;
+  }, [availableQuotes]);
+
+  const selectedLiveMode = shipMethodToQuoteMode(shipMethod);
+  const selectedLiveQuote =
+    selectedLiveMode !== null
+      ? availableQuotes.find((quote) => quote.mode === selectedLiveMode) ?? null
+      : null;
+
+  const selectedLiveAmount = selectedLiveQuote
+    ? resolveQuoteAmount(selectedLiveQuote)
+    : null;
+
+  const normalizedLiveQuote =
+    selectedLiveAmount !== null
+      ? Math.max(0, Math.round(selectedLiveAmount))
+      : null;
+
+  useEffect(() => {
+    if (availableQuotes.length === 0) {
+      if (shipMethod === "live_E" || shipMethod === "live_S") {
+        setShipMethod("standard");
+      }
+      return;
+    }
+
+    const currentMode = shipMethodToQuoteMode(shipMethod);
+    const modeAvailable =
+      currentMode !== null &&
+      availableQuotes.some((quote) => quote.mode === currentMode);
+
+    if (modeAvailable) {
+      return;
+    }
+
+    const preferred =
+      availableQuotes.find((quote) => quote.mode === "E") ??
+      availableQuotes[0];
+    if (preferred) {
+      setShipMethod(preferred.mode === "E" ? "live_E" : "live_S");
+    }
+  }, [availableQuotes, shipMethod]);
 
   const shipRate = useMemo(() => {
-    if (hasLiveQuote) {
-      return Math.max(0, Math.round(delhiveryCharge));
+    if (normalizedLiveQuote !== null) {
+      return normalizedLiveQuote;
     }
-    return shipMethod === "standard"
-      ? 299
-      : shipMethod === "express"
-      ? 599
-      : 999;
-  }, [hasLiveQuote, delhiveryCharge, shipMethod]);
+    return 0;
+  }, [normalizedLiveQuote]);
 
   useEffect(() => {
     if (!authUser) {
@@ -641,12 +841,11 @@ const serviceabilityEstimate = useMemo(
 );
 
 const shipEta =
-  serviceabilityEstimate ??
-  (shipMethod === "standard"
-    ? "3–5 business days"
-    : shipMethod === "express"
-    ? "2–3 business days"
-    : "1–2 business days");
+  selectedLiveMode && selectedLiveQuote
+    ? selectedLiveMode === "E"
+      ? "2–4 business days"
+      : "4–7 business days"
+    : serviceabilityEstimate ?? "Delivery estimate available after quote";
 
   const shippingPinDisplay = useMemo(
     () => (shipping.zip.trim() || "this PIN"),
@@ -662,43 +861,30 @@ const shipEta =
   };
 
   const shippingOptions = useMemo<ShippingOption[]>(() => {
-    if (hasLiveQuote) {
-      return [
-        {
-          value: "live",
-          label: serviceability?.isServiceable
-            ? `Deliver to ${shippingPinDisplay}`
-            : "Courier delivery",
-          eta: shipEta,
+    return availableQuotes
+      .map<ShippingOption | null>((quote) => {
+        const amount = resolveQuoteAmount(quote);
+        const rounded = amount !== null ? Math.max(0, Math.round(amount)) : null;
+        if (rounded === null) {
+          return null;
+        }
+        const isExpress = quote.mode === "E";
+        return {
+          value: isExpress ? "live_E" : "live_S",
+          label: isExpress ? "Express courier (Air)" : "Surface courier",
+          eta: isExpress ? "2–4 business days" : "4–7 business days",
           description: serviceabilityEstimate
-            ? `Estimated delivery ${shipEta}`
-            : "Dynamic courier rate",
-          amount: shipRate,
-        },
-      ];
-    }
-    return [
-      {
-        value: "standard",
-        label: "Standard",
-        eta: "3–5 business days",
-        amount: 299,
-      },
-      {
-        value: "express",
-        label: "Express",
-        eta: "2–3 business days",
-        amount: 599,
-      },
-      {
-        value: "overnight",
-        label: "Overnight",
-        eta: "1–2 business days",
-        amount: 999,
-      },
-    ];
-  }, [hasLiveQuote, serviceability?.isServiceable, shippingPinDisplay, serviceabilityEstimate, shipRate, shipEta]);
-
+            ? `Estimated delivery ${serviceabilityEstimate}${
+                usingServiceabilityFallback ? " (approx.)" : ""
+              }`
+            : usingServiceabilityFallback
+            ? `Approximate courier rate for ${shippingPinDisplay}`
+            : `Quote for ${shippingPinDisplay}`,
+          amount: rounded,
+        };
+      })
+      .filter((option): option is ShippingOption => option !== null);
+  }, [availableQuotes, serviceabilityEstimate, shippingPinDisplay, usingServiceabilityFallback]);
 
   const tax = Math.round((subtotal + shipRate) * 0.18 * 100) / 100;
   const total = Math.round((subtotal + shipRate + tax) * 100) / 100;
@@ -1210,12 +1396,12 @@ const shipEta =
                             ) : (
                               <p>Try a different PIN or contact support for assistance.</p>
                             )}
-                            {serviceability.charges.total != null ? (
+                            {displayedQuoteAmount != null ? (
                               <p>
                                 Indicative shipping charge
                                 {" "}
                                 <span className="font-semibold">
-                                  {formatCurrencyINR(serviceability.charges.total)}
+                                  {formatCurrencyINR(displayedQuoteAmount)}
                                 </span>
                               </p>
                             ) : null}
@@ -1286,38 +1472,57 @@ const shipEta =
             <Card className="rounded-2xl">
               <CardContent className="space-y-6 p-4 md:p-6">
                 <h2 className="text-lg font-semibold">Shipping Method</h2>
-                <RadioGroup
-                  value={shipMethod}
-                  onValueChange={(value) => setShipMethod(value as ShipMethod)}
-                  className="space-y-3"
-                >
-                  {shippingOptions.map((option) => (
-                    <label
-                      key={option.value}
-                      className="flex cursor-pointer items-center justify-between rounded-xl border p-3"
-                    >
-                      <div className="flex items-center gap-3">
-                        <RadioGroupItem
-                          value={option.value}
-                          id={`ship-${option.value}`}
-                          disabled={shippingOptions.length === 1}
-                        />
-                        <div>
-                          <div className="font-medium">{option.label}</div>
-                          <div className="text-xs text-gray-600">
-                            {option.description ?? option.eta}
+                {shippingQuote.isLoading ? (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                    Fetching live courier charges…
+                  </div>
+                ) : shippingOptions.length > 0 ? (
+                  <RadioGroup
+                    value={shipMethod}
+                    onValueChange={(value) => setShipMethod(value as ShipMethod)}
+                    className="space-y-3"
+                  >
+                    {shippingOptions.map((option) => (
+                      <label
+                        key={option.value}
+                        className="flex cursor-pointer items-center justify-between rounded-xl border p-3"
+                      >
+                        <div className="flex items-center gap-3">
+                          <RadioGroupItem
+                            value={option.value}
+                            id={`ship-${option.value}`}
+                          />
+                          <div>
+                            <div className="font-medium">{option.label}</div>
+                            <div className="text-xs text-gray-600">
+                              {option.description ?? option.eta}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="font-semibold">
-                        {formatPaise(option.amount, {
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 0,
-                        })}
-                      </div>
-                    </label>
-                  ))}
-                </RadioGroup>
+                        <div className="font-semibold">
+                          {formatPaise(option.amount, {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 0,
+                          })}
+                        </div>
+                      </label>
+                    ))}
+                  </RadioGroup>
+                ) : (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    Unable to load live shipping charges right now. Please re-check the PIN code or try again later.
+                  </div>
+                )}
+
+                {shippingQuote.isLoading ? (
+                  <div className="text-xs text-gray-500">
+                    Fetching live courier charges…
+                  </div>
+                ) : shippingQuote.error ? (
+                  <div className="text-xs text-rose-600">
+                    {shippingQuote.error}
+                  </div>
+                ) : null}
 
                 <div className="text-sm text-gray-600">
                   Estimated delivery:{" "}
@@ -1354,24 +1559,24 @@ const shipEta =
                   onValueChange={setPayTab}
                   className="w-full"
                 >
-                  <TabsList className="grid w-full max-w-md grid-cols-3">
+                  <TabsList className="grid w-full gap-3 bg-transparent p-0 grid-cols-1 sm:grid-cols-3 mb-2">
                     <TabsTrigger
                       value="card"
-                      className="flex items-center gap-2"
+                      className="flex w-full flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-center sm:flex-row sm:gap-2 data-[state=active]:border-pink-500 data-[state=active]:bg-pink-50 data-[state=active]:text-pink-600"
                     >
                       <CreditCard className="h-4 w-4" />
                       Card
                     </TabsTrigger>
                     <TabsTrigger
                       value="upi"
-                      className="flex items-center gap-2"
+                      className="flex w-full flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-center sm:flex-row sm:gap-2 data-[state=active]:border-pink-500 data-[state=active]:bg-pink-50 data-[state=active]:text-pink-600"
                     >
                       <QrCode className="h-4 w-4" />
                       UPI
                     </TabsTrigger>
                     <TabsTrigger
                       value="cod"
-                      className="flex items-center gap-2"
+                      className="flex w-full flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-center sm:flex-row sm:gap-2 data-[state=active]:border-pink-500 data-[state=active]:bg-pink-50 data-[state=active]:text-pink-600"
                       disabled={!isCodAllowed}
                     >
                       <Package className="h-4 w-4" />

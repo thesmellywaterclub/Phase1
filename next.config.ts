@@ -15,6 +15,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "d30u2u954xt29r.cloudfront.net",
       },
+      {
+        protocol: "https",
+        hostname: "swc-product-images-dev.s3.ap-south-1.amazonaws.com",
+      },
     ],
   },
 };

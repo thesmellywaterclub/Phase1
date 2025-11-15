@@ -447,16 +447,25 @@ export default function AdminCatalogPage() {
     }
 
     const sizeMl = Number.parseInt(variantForm.sizeMl, 10);
-    const mrpPaise = Number.parseInt(variantForm.mrpPaise, 10);
-    const salePaise =
+    const mrpRupees = Number.parseFloat(variantForm.mrpPaise);
+    const saleRupees =
       variantForm.salePaise.trim().length > 0
-        ? Number.parseInt(variantForm.salePaise, 10)
+        ? Number.parseFloat(variantForm.salePaise)
+        : undefined;
+    const mrpPaise = Number.isNaN(mrpRupees) ? Number.NaN : Math.round(mrpRupees * 100);
+    const salePaise =
+      saleRupees !== undefined && !Number.isNaN(saleRupees)
+        ? Math.round(saleRupees * 100)
         : undefined;
 
-    if (!variantForm.sku.trim() || Number.isNaN(sizeMl) || Number.isNaN(mrpPaise)) {
+    if (
+      !variantForm.sku.trim() ||
+      Number.isNaN(sizeMl) ||
+      Number.isNaN(mrpPaise)
+    ) {
       setVariantStatus({
         type: "error",
-        message: "SKU, size, and MRP are required and must be valid numbers.",
+        message: "SKU, size, and MRP (in rupees) are required and must be valid numbers.",
       });
       return;
     }
@@ -845,23 +854,25 @@ export default function AdminCatalogPage() {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="variant-mrp">MRP (paise)</Label>
+          <Label htmlFor="variant-mrp">MRP (₹)</Label>
           <Input
             id="variant-mrp"
             type="number"
+            step="0.01"
             value={variantForm.mrpPaise}
             onChange={(event) => handleVariantFieldChange("mrpPaise", event.target.value)}
-            placeholder="950000"
+            placeholder="9500"
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="variant-sale">Sale price (paise)</Label>
+          <Label htmlFor="variant-sale">Sale price (₹)</Label>
           <Input
             id="variant-sale"
             type="number"
+            step="0.01"
             value={variantForm.salePaise}
             onChange={(event) => handleVariantFieldChange("salePaise", event.target.value)}
-            placeholder="899000"
+            placeholder="8990"
           />
         </div>
         <div className="md:col-span-4">

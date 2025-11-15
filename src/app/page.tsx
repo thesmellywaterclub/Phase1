@@ -4,9 +4,9 @@ import {
   ArrowRight,
   ArrowUpRight,
   ChevronRight,
-  Leaf,
-  MessagesSquare,
-  Sparkles,
+  ShieldCheck,
+  Truck,
+  Store,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,27 +21,46 @@ import { getPrimaryMedia } from "@/data/products";
 import { cn } from "@/lib/utils";
 import { formatPaise } from "@/lib/money";
 
-const highlightIconMap: Record<string, LucideIcon> = {
-  Sparkles,
-  Leaf,
-  MessagesSquare,
-};
-
 const FALLBACK_HOME_IMAGE = "https://images.unsplash.com/photo-1573537805874-4cedc5d389ce?auto=format&fit=crop&w=1400&q=80";
 
-type HighlightIconProps = {
-  name: string;
-};
-
-function HighlightIcon({ name }: HighlightIconProps) {
-  const Icon = highlightIconMap[name] ?? Sparkles;
-  return <Icon className="h-5 w-5" aria-hidden="true" />;
-}
+const TRUST_SIGNALS: Array<{
+  title: string;
+  description: string;
+  icon: LucideIcon;
+}> = [
+  {
+    title: "Marketplace verified",
+    description: "Every seller and SKU is vetted before it goes live.",
+    icon: ShieldCheck,
+  },
+  {
+    title: "Insured shipping",
+    description: "Nationwide delivery with live courier tracking.",
+    icon: Truck,
+  },
+  {
+    title: "Store support",
+    description: "Concierge help for returns, authentication, and gifting.",
+    icon: Store,
+  },
+];
 
 export default async function Home() {
   const data = await getHomePageData();
   const isFallbackData =
     (data as HomePageDataWithSource).__source === "fallback";
+  const heroContent =
+    data.hero ?? {
+      eyebrow: "Trusted fragrance marketplace",
+      heading: "Shop verified boutiques and limited releases in one place.",
+      subheading:
+        "Browse live inventory from certified sellers, track insured deliveries, and get concierge support on every order.",
+      ctas: [
+        { label: "Browse catalog", href: "/products", emphasis: true },
+        { label: "Sell with us", href: "/seller" },
+      ],
+      image: FALLBACK_HOME_IMAGE,
+    };
 
   const renderProductTile = (
     item: (typeof data.productGallery)[number],
@@ -128,21 +147,51 @@ export default async function Home() {
             refresh once the connection returns.
           </div>
         ) : null}
-        <section className="grid gap-4 sm:grid-cols-3">
-          {data.highlights.map((highlight) => (
-            <div
-              key={highlight.id}
-              className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur"
-            >
-              <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-pink-600">
-                  <HighlightIcon name={highlight.icon} />
+        <section className="rounded-[2.5rem] border border-gray-200 bg-gradient-to-r from-white via-rose-50 to-white px-6 py-10 shadow-sm backdrop-blur sm:px-10 lg:px-16">
+          <div className="space-y-6">
+            <div className="space-y-3">
+              {heroContent.eyebrow ? (
+                <span className="inline-flex items-center rounded-full border border-pink-100 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-pink-600">
+                  {heroContent.eyebrow}
                 </span>
-                {highlight.title}
-              </div>
-              <p className="mt-2 text-sm text-gray-600">
-                {highlight.description}
+              ) : null}
+              <h1 className="text-3xl font-semibold leading-tight text-gray-900 md:text-4xl">
+                {heroContent.heading}
+              </h1>
+              <p className="max-w-3xl text-sm text-gray-600 md:text-base">
+                {heroContent.subheading}
               </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {heroContent.ctas?.map((cta) => (
+                <Link key={cta.href} href={cta.href}>
+                  <Button
+                    className={cn(
+                      "gap-2",
+                      cta.emphasis
+                        ? "bg-pink-600 text-white hover:bg-pink-700"
+                        : "border border-gray-200 bg-white text-gray-900 hover:border-pink-200",
+                    )}
+                  >
+                    {cta.label}
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 rounded-[2rem] border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur sm:grid-cols-3">
+          {TRUST_SIGNALS.map((signal) => (
+            <div key={signal.title} className="flex gap-3">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-50 text-pink-600">
+                <signal.icon className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">{signal.title}</p>
+                <p className="text-xs text-gray-600">{signal.description}</p>
+              </div>
             </div>
           ))}
         </section>
